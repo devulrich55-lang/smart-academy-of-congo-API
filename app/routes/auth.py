@@ -80,7 +80,11 @@ def login_route(request: Request, body: dict, response: Response):
             {"universite": body.get("universite"), "codeUni": body.get("codeUni")},
         )
         _set_auth_cookies(response, result["accessToken"], result["refreshRaw"])
-        return {"ok": True, "session": result["session"]}
+        payload = {"ok": True, "session": result["session"]}
+        if settings.cross_origin_auth:
+            payload["accessToken"] = result["accessToken"]
+            payload["refreshToken"] = result["refreshRaw"]
+        return payload
     except ValueError as e:
         _map_error(e)
 
@@ -116,28 +120,54 @@ def register_route(request: Request, body: dict, response: Response):
         user = create_user(profile)
         tokens = auth_service.issue_tokens(user)
         _set_auth_cookies(response, tokens["accessToken"], tokens["refreshRaw"])
-        return {"ok": True, "session": tokens["session"]}
+        payload = {"ok": True, "session": tokens["session"]}
+        if settings.cross_origin_auth:
+            payload["accessToken"] = tokens["accessToken"]
+            payload["refreshToken"] = tokens["refreshRaw"]
+        return payload
     except ValueError as e:
         _map_error(e)
 
 
 @router.post("/refresh")
 @limiter.limit("20/minute")
-def refresh_route(
-    request: Request, response: Response, sac_refresh: str | None = Cookie(default=None)
+async def refresh_route(
+    request: Request,
+    response: Response,
+    sac_refresh: str | None = Cookie(default=None),
 ):
+    body = {}
     try:
-        result = auth_service.refresh_session(sac_refresh)
+        body = await request.json()
+    except Exception:
+        body = {}
+    refresh_raw = sac_refresh or body.get("refreshToken")
+    try:
+        result = auth_service.refresh_session(refresh_raw)
         _set_auth_cookies(response, result["accessToken"], result["refreshRaw"])
-        return {"ok": True, "session": result["session"]}
+        payload = {"ok": True, "session": result["session"]}
+        if settings.cross_origin_auth:
+            payload["accessToken"] = result["accessToken"]
+            payload["refreshToken"] = result["refreshRaw"]
+        return payload
     except ValueError as e:
         _clear_auth_cookies(response)
         _map_error(e)
 
 
 @router.post("/logout")
-def logout_route(response: Response, sac_refresh: str | None = Cookie(default=None)):
-    auth_service.logout(sac_refresh)
+async def logout_route(
+    request: Request,
+    response: Response,
+    sac_refresh: str | None = Cookie(default=None),
+):
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    refresh_raw = sac_refresh or body.get("refreshToken")
+    auth_service.logout(refresh_raw)
     _clear_auth_cookies(response)
     return {"ok": True}
 
