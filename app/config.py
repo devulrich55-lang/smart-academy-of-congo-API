@@ -60,6 +60,7 @@ class Settings:
     smtp_user: str = os.getenv("SMTP_USER", "").strip()
     smtp_pass: str = os.getenv("SMTP_PASS", "").strip()
     email_from: str = os.getenv("EMAIL_FROM", "noreply@smartacademy.cd").strip()
+    cross_origin_auth: bool = os.getenv("CROSS_ORIGIN_AUTH", "false").lower() == "true"
 
 
 settings = Settings()

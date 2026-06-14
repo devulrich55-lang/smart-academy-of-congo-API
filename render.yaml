@@ -34,6 +34,8 @@ services:
         value: https://REPLACE-WITH-YOUR-FRONTEND-URL.com
       - key: FRONTEND_URL
         value: https://REPLACE-WITH-YOUR-FRONTEND-URL.com
+      - key: CROSS_ORIGIN_AUTH
+        value: "true"
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT

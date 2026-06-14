@@ -30,12 +30,20 @@ ERROR_MAP = {
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_raw: str) -> None:
-    common = {
-        "httponly": True,
-        "secure": settings.cookie_secure,
-        "samesite": "lax" if not settings.is_prod else "strict",
-        "path": "/",
-    }
+    if settings.cross_origin_auth:
+        common = {
+            "httponly": True,
+            "secure": True,
+            "samesite": "none",
+            "path": "/",
+        }
+    else:
+        common = {
+            "httponly": True,
+            "secure": settings.cookie_secure,
+            "samesite": "lax" if not settings.is_prod else "strict",
+            "path": "/",
+        }
     response.set_cookie("sac_access", access_token, max_age=15 * 60, **common)
     response.set_cookie("sac_refresh", refresh_raw, max_age=7 * 24 * 60 * 60, **common)
 
