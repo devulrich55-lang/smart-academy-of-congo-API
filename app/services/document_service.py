@@ -1,0 +1,208 @@
+import json
+import uuid
+from datetime import datetime, timezone
+
+from app.database import get_db, row_to_document
+from app.utils.sanitize import (
+    clean_media_category,
+    clean_niveau,
+    clean_reaction_type,
+    clean_text,
+)
+from app.utils.visibility import SOURCE_BY_ROLE, student_sees_document
+
+
+def get_all_documents() -> list[dict]:
+    rows = get_db().execute(
+        "SELECT * FROM documents ORDER BY created_at DESC"
+    ).fetchall()
+    return [row_to_document(r) for r in rows]
+
+
+def get_document_by_id(doc_id: str) -> dict | None:
+    row = get_db().execute(
+        "SELECT * FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    return row_to_document(row)
+
+
+def get_documents_for_student(student: dict) -> list[dict]:
+    return [d for d in get_all_documents() if student_sees_document(student, d)]
+
+
+def get_my_documents(user: dict) -> list[dict]:
+    source = SOURCE_BY_ROLE.get(user.get("role"))
+    if not source:
+        return []
+    if user.get("role") == "universite":
+        return [d for d in get_all_documents() if d["source"] == "administration"]
+    return [
+        d
+        for d in get_all_documents()
+        if d["source"] == source and d["authorId"] == user["id"]
+    ]
+
+
+def can_edit(user: dict | None, doc: dict | None) -> bool:
+    if not user or not doc:
+        return False
+    if user.get("role") == "universite":
+        return doc.get("source") == "administration"
+    src = SOURCE_BY_ROLE.get(user.get("role"))
+    return src == doc.get("source") and doc.get("authorId") == user.get("id")
+
+
+def create_document(user: dict, data: dict) -> dict:
+    source = SOURCE_BY_ROLE.get(user.get("role"))
+    if not source:
+        raise ValueError("FORBIDDEN")
+
+    is_campus = user.get("role") == "universite"
+    is_section = data.get("audienceType") == "section" and data.get("sectionId")
+    doc_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    audience_type = (
+        "section" if is_section else "campus" if is_campus else "ma_classe"
+    )
+
+    get_db().execute(
+        """INSERT INTO documents (
+          id, title, description, source, author, author_id, date,
+          media_category, type, size, media_url, media_path, attachments, audience_type,
+          section_id, section_name, universite, filiere, niveau, course_code, course_name, classe,
+          allow_reactions, reactions, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            doc_id,
+            clean_text(data.get("title"), 300),
+            clean_text(data.get("description"), 5000),
+            source,
+            clean_text(data.get("author"), 150) or user["email"],
+            user["id"],
+            now[:10],
+            clean_media_category(data.get("mediaCategory")),
+            clean_text(data.get("type"), 20) or "PDF",
+            clean_text(data.get("size"), 30) or "—",
+            clean_text(data.get("mediaUrl"), 2000)
+            if data.get("mediaUrl") and not str(data["mediaUrl"]).startswith("data:")
+            else "",
+            data.get("mediaPath"),
+            json.dumps(data.get("attachments") or []),
+            audience_type,
+            clean_text(data.get("sectionId"), 80) if is_section else None,
+            clean_text(data.get("sectionName"), 200) if is_section else None,
+            clean_text(data.get("universite") or user.get("universite"), 50),
+            clean_text(data.get("filiere"), 200),
+            clean_niveau(data.get("niveau")) or data.get("niveau"),
+            clean_text(data.get("courseCode"), 30),
+            clean_text(data.get("courseName"), 200),
+            clean_text(data.get("classe"), 150),
+            0 if is_campus else (1 if data.get("allowReactions") else 0),
+            json.dumps({"useful": [], "question": [], "thanks": []}),
+            now,
+            now,
+        ),
+    )
+    get_db().commit()
+    return get_document_by_id(doc_id)
+
+
+def update_document(user: dict, doc_id: str, data: dict) -> dict:
+    doc = get_document_by_id(doc_id)
+    if not doc or not can_edit(user, doc):
+        raise ValueError("FORBIDDEN")
+    now = datetime.now(timezone.utc).isoformat()
+    fields = {
+        "title": clean_text(data["title"], 300) if data.get("title") is not None else doc["title"],
+        "description": clean_text(data["description"], 5000)
+        if data.get("description") is not None
+        else doc["description"],
+        "media_category": clean_media_category(data["mediaCategory"])
+        if data.get("mediaCategory") is not None
+        else doc["mediaCategory"],
+        "type": clean_text(data["type"], 20) if data.get("type") is not None else doc["type"],
+        "size": clean_text(data["size"], 30) if data.get("size") is not None else doc["size"],
+        "media_url": (
+            clean_text(data["mediaUrl"], 2000)
+            if data.get("mediaUrl") and not str(data["mediaUrl"]).startswith("data:")
+            else "" if data.get("mediaUrl") == "" else doc["mediaUrl"]
+        ),
+        "filiere": clean_text(data["filiere"], 200)
+        if data.get("filiere") is not None
+        else doc["filiere"],
+        "niveau": (clean_niveau(data["niveau"]) or data["niveau"])
+        if data.get("niveau") is not None
+        else doc["niveau"],
+        "course_code": clean_text(data["courseCode"], 30)
+        if data.get("courseCode") is not None
+        else doc["courseCode"],
+        "course_name": clean_text(data["courseName"], 200)
+        if data.get("courseName") is not None
+        else doc["courseName"],
+        "classe": clean_text(data["classe"], 150)
+        if data.get("classe") is not None
+        else doc["classe"],
+        "allow_reactions": (1 if data["allowReactions"] else 0)
+        if data.get("allowReactions") is not None
+        else (1 if doc["allowReactions"] else 0),
+    }
+    get_db().execute(
+        """UPDATE documents SET title=?, description=?, media_category=?, type=?, size=?,
+           media_url=?, filiere=?, niveau=?, course_code=?, course_name=?, classe=?,
+           allow_reactions=?, updated_at=? WHERE id=?""",
+        (
+            fields["title"],
+            fields["description"],
+            fields["media_category"],
+            fields["type"],
+            fields["size"],
+            fields["media_url"],
+            fields["filiere"],
+            fields["niveau"],
+            fields["course_code"],
+            fields["course_name"],
+            fields["classe"],
+            fields["allow_reactions"],
+            now,
+            doc_id,
+        ),
+    )
+    get_db().commit()
+    return get_document_by_id(doc_id)
+
+
+def delete_document(user: dict, doc_id: str) -> bool:
+    doc = get_document_by_id(doc_id)
+    if not doc or not can_edit(user, doc):
+        raise ValueError("FORBIDDEN")
+    get_db().execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    get_db().commit()
+    return True
+
+
+def add_reaction(doc_id: str, reaction_type: str, student_id: str) -> dict:
+    rt = clean_reaction_type(reaction_type)
+    if not rt:
+        raise ValueError("INVALID_REACTION")
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        raise ValueError("NOT_FOUND")
+    if not doc.get("allowReactions") or doc.get("source") not in (
+        "professeur",
+        "assistant",
+    ):
+        raise ValueError("FORBIDDEN")
+
+    reactions = doc.get("reactions") or {"useful": [], "question": [], "thanks": []}
+    for t in ("useful", "question", "thanks"):
+        reactions[t] = [i for i in reactions.get(t, []) if i != student_id]
+    if student_id not in reactions.get(rt, []):
+        reactions.setdefault(rt, []).append(student_id)
+
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().execute(
+        "UPDATE documents SET reactions = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(reactions), now, doc_id),
+    )
+    get_db().commit()
+    return get_document_by_id(doc_id)

@@ -1,0 +1,11 @@
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+data
+uploads
+.git
+.gitignore
+README.md
+render.yaml
