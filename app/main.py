@@ -153,6 +153,9 @@ app.include_router(nominations.router, prefix="/api")
 
 
 
+settings.upload_dir.mkdir(parents=True, exist_ok=True)
+settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+
 app.mount(
 
     "/uploads",
