@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # API Python — Smart Academy of Congo (backend principal)
 
 Backend **FastAPI** — c'est **celui-ci** que vous devez déployer en production.
@@ -67,3 +68,6 @@ Réponse attendue :
 
 - `backend/` (Node.js) — legacy, peut être ignoré
 - `backend-php/` — optionnel, pas nécessaire si vous utilisez Python
+=======
+# smart-academy-of-congo-API
+>>>>>>> dc835eef4153c6a72906b3f3f845b8663d4d5d1e
