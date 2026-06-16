@@ -50,8 +50,9 @@ async def lifespan(_app: FastAPI):
     user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
     doc_count = db.execute("SELECT COUNT(*) AS c FROM documents").fetchone()["c"]
     print(
-        f"[SAC] DB={settings.database_backend} uploads={settings.upload_dir} "
-        f"persistent_uploads={settings.uploads_on_render_disk} users={user_count} docs={doc_count}"
+        f"[SAC] DB={settings.database_backend} db={settings.db_path} uploads={settings.upload_dir} "
+        f"persistent={settings.persistence_on_render_disk} ephemeral={settings.storage_ephemeral} "
+        f"users={user_count} docs={doc_count}"
     )
     seed_if_empty()
     seed_demo_sections_if_missing()
@@ -148,7 +149,11 @@ def health(request: Request):
         "database": "up" if db_ok else "down",
         "storage": {
             "backend": settings.database_backend,
-            "mode": "mysql" if settings.use_mysql else "sqlite-test",
+            "mode": (
+                "mysql"
+                if settings.use_mysql
+                else ("sqlite-ephemeral" if settings.storage_ephemeral else "sqlite-persistent")
+            ),
             "mysqlHost": settings.mysql_config.get("host") if settings.use_mysql else None,
             "mysqlDatabase": settings.mysql_config.get("database") if settings.use_mysql else None,
             "databasePath": str(settings.db_path) if not settings.use_mysql else None,

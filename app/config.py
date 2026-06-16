@@ -98,7 +98,7 @@ class Settings:
         if self.database_url:
             return True
         if os.getenv("DATABASE_BACKEND", "").lower() == "mysql":
-            return True
+            return bool(self.database_url or self.mysql_password)
         return bool(self.mysql_password and self.mysql_database)
 
     @property
@@ -131,15 +131,23 @@ class Settings:
         return str(self.db_path).startswith("/data")
 
     @property
+    def render_free_tier(self) -> bool:
+        return getattr(self, "storage_ephemeral", False) or os.getenv(
+            "SAC_RENDER_FREE", ""
+        ).lower() in ("1", "true", "yes")
+
+    @property
     def persistence_on_render_disk(self) -> bool:
         """Comptes + uploads persistants sur le disque Render /data."""
+        if getattr(self, "storage_ephemeral", False):
+            return False
         if self.use_mysql:
             return self.uploads_on_render_disk
         return self.db_on_render_disk and self.uploads_on_render_disk
 
 
 settings = Settings()
-
+settings.storage_ephemeral = False
 # Gmail : raccourci — GMAIL_USER + GMAIL_APP_PASSWORD suffisent
 if settings.gmail_user and settings.gmail_app_password:
     if not settings.smtp_host:
@@ -160,6 +168,30 @@ if settings.frontend_url and settings.frontend_url not in settings.allowed_origi
     settings.allowed_origins.append(settings.frontend_url)
 
 
+def _render_data_writable() -> bool:
+    """Vérifie si le disque /data est monté et accessible en écriture."""
+    try:
+        data_root = Path("/data")
+        data_root.mkdir(parents=True, exist_ok=True)
+        probe = data_root / ".sac_write_test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+_on_render = os.getenv("RENDER", "").lower() == "true"
+if _on_render and not settings.use_mysql:
+    wants_persistent = settings.db_on_render_disk and settings.uploads_on_render_disk
+    if wants_persistent and _render_data_writable():
+        settings.storage_ephemeral = False
+    else:
+        settings.db_path = (ROOT / "data" / "sac.db").resolve()
+        settings.upload_dir = (ROOT / "uploads").resolve()
+        settings.storage_ephemeral = True
+
+
 def _validate_production_config() -> None:
     if not settings.is_prod:
         return
@@ -177,19 +209,7 @@ def _validate_production_config() -> None:
                 "Sur Render, les fichiers uploadés doivent être sur le disque persistant : "
                 f"UPLOAD_DIR={settings.upload_dir}. Montez /data et utilisez UPLOAD_DIR=/data/uploads."
             )
-        return
-
-    # Mode test / budget : SQLite sur disque persistant Render (jusqu'à ~5 000 comptes)
-    if on_render:
-        if not settings.db_on_render_disk:
-            raise RuntimeError(
-                "Mode test SQLite sur Render : montez le disque /data et définissez "
-                "DATABASE_PATH=/data/sac.db pour ne pas perdre les comptes au redéploiement."
-            )
-        if not settings.uploads_on_render_disk:
-            raise RuntimeError(
-                "Sur Render, UPLOAD_DIR doit être /data/uploads avec le disque /data monté."
-            )
+    # SQLite sur Render : pas de crash — repli automatique si /data absent (voir ci-dessus)
 
 
 _validate_production_config()

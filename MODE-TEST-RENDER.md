@@ -9,7 +9,32 @@ Pour les **tests** (30 à 5 000 utilisateurs) **sans budget** PlanetScale/MySQL,
 
 ---
 
-## Configuration Render (mode test — à faire maintenant)
+## Option A — Gratuit Render (instance free, **sans disque**)
+
+Les comptes **ne survivent pas** à un redéploiement. Utile pour tester que l'API démarre.
+
+```env
+DATABASE_BACKEND=sqlite
+SAC_RENDER_FREE=true
+```
+
+Ne définissez **pas** `DATABASE_PATH=/data/...` (pas de disque sur le plan gratuit).
+
+---
+
+## Option B — Persistance réelle (recommandé pour 30+ comptes)
+
+Plan **Starter** (~7 $/mois) + disque **1 Go** sur `/data`.
+
+```env
+DATABASE_BACKEND=sqlite
+DATABASE_PATH=/data/sac.db
+UPLOAD_DIR=/data/uploads
+```
+
+**Ne pas** définir `SAC_RENDER_FREE`.
+
+---
 
 ### 1. Disque persistant
 
