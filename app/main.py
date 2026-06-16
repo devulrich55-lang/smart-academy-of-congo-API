@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 
 from fastapi.middleware.cors import CORSMiddleware
-
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 
 from app.database import get_db
+from app.database_maintenance import run_maintenance
 
 from app.middleware.security import (
 
@@ -43,15 +44,22 @@ from app.seed import seed_demo_sections_if_missing, seed_if_empty
 @asynccontextmanager
 
 async def lifespan(_app: FastAPI):
-
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
-
-    get_db()
-
+    settings.ensure_storage_dirs()
+    db = get_db()
+    user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+    doc_count = db.execute("SELECT COUNT(*) AS c FROM documents").fetchone()["c"]
+    print(
+        f"[SAC] DB={settings.database_backend} uploads={settings.upload_dir} "
+        f"persistent_uploads={settings.uploads_on_render_disk} users={user_count} docs={doc_count}"
+    )
     seed_if_empty()
-
     seed_demo_sections_if_missing()
-
+    try:
+        maint = run_maintenance()
+        if maint["refreshTokensPurged"] or maint["resetTokensPurged"]:
+            print(f"[SAC] Maintenance: {maint}")
+    except Exception as exc:
+        print(f"[SAC] Maintenance skipped: {exc}")
     yield
 
 
@@ -74,6 +82,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(OriginGuardMiddleware)
@@ -120,9 +129,14 @@ async def http_exception_handler(_request: Request, exc: HTTPException):
 
 def health(request: Request):
     db_ok = False
+    user_count = 0
+    doc_count = 0
     try:
-        get_db().execute("SELECT 1").fetchone()
+        db = get_db()
+        db.execute("SELECT 1").fetchone()
         db_ok = True
+        user_count = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+        doc_count = db.execute("SELECT COUNT(*) AS c FROM documents").fetchone()["c"]
     except Exception:
         db_ok = False
     return {
@@ -131,6 +145,15 @@ def health(request: Request):
         "version": "1.0.0",
         "runtime": "python",
         "database": "up" if db_ok else "down",
+        "storage": {
+            "backend": settings.database_backend,
+            "mysqlHost": settings.mysql_config.get("host") if settings.use_mysql else None,
+            "mysqlDatabase": settings.mysql_config.get("database") if settings.use_mysql else None,
+            "uploadDir": str(settings.upload_dir),
+            "uploadsOnRenderDisk": settings.uploads_on_render_disk,
+            "userCount": user_count,
+            "documentCount": doc_count,
+        },
     }
 
 
@@ -153,8 +176,7 @@ app.include_router(nominations.router, prefix="/api")
 
 
 
-settings.upload_dir.mkdir(parents=True, exist_ok=True)
-settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+settings.ensure_storage_dirs()
 
 app.mount(
 

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
 from app.services import audit_service, reclamation_service
 from app.utils.guards import strip_identity_fields
+from app.utils.pagination import clamp_page
 
 router = APIRouter(prefix="/reclamations", tags=["reclamations"])
 
@@ -29,9 +31,27 @@ def _handle_error(exc: ValueError) -> None:
 
 
 @router.get("/me")
-def list_my_reclamations(user: dict = Depends(get_current_user)):
+def list_my_reclamations(
+    user: dict = Depends(get_current_user),
+    limit: int | None = Query(None, ge=1),
+    offset: int | None = Query(None, ge=0),
+):
+    page_limit, page_offset = clamp_page(
+        limit,
+        offset,
+        default=settings.api_page_default,
+        maximum=settings.api_page_max,
+    )
+    recs = reclamation_service.list_reclamations_for_actor(
+        user, page_limit, page_offset
+    )
     return {
-        "reclamations": reclamation_service.list_reclamations_for_actor(user)
+        "reclamations": recs,
+        "pagination": {
+            "limit": page_limit,
+            "offset": page_offset,
+            "hasMore": len(recs) == page_limit,
+        },
     }
 
 

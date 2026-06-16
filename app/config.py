@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
@@ -11,10 +12,26 @@ if os.getenv("NODE_ENV") == "production":
     for key in required:
         val = os.getenv(key, "")
         if not val or "CHANGEZ_MOI" in val.upper() or val.startswith("dev-only-"):
-            raise RuntimeError(f"Variable {key} obligatoire en production (valeur unique 32+ caractères)")
+            raise RuntimeError(
+                f"Variable {key} obligatoire en production (valeur unique 32+ caractères)"
+            )
     origins = os.getenv("ALLOWED_ORIGINS", "").strip()
     if not origins:
         raise RuntimeError("ALLOWED_ORIGINS obligatoire en production (domaine frontend)")
+
+
+def _parse_database_url(url: str) -> dict:
+    normalized = url.replace("mysql+pymysql://", "mysql://").replace(
+        "mysql+mysqlconnector://", "mysql://"
+    )
+    parsed = urlparse(normalized)
+    return {
+        "host": parsed.hostname or "localhost",
+        "port": parsed.port or 3306,
+        "user": unquote(parsed.username or ""),
+        "password": unquote(parsed.password or ""),
+        "database": (parsed.path or "/").lstrip("/"),
+    }
 
 
 class Settings:
@@ -29,6 +46,12 @@ class Settings:
     )
     jwt_access_expires: str = "15m"
     jwt_refresh_expires: str = "7d"
+    database_url: str = os.getenv("DATABASE_URL", "").strip()
+    mysql_host: str = os.getenv("MYSQL_HOST", "localhost").strip()
+    mysql_port: int = int(os.getenv("MYSQL_PORT", "3306"))
+    mysql_user: str = os.getenv("MYSQL_USER", "root").strip()
+    mysql_password: str = os.getenv("MYSQL_PASSWORD", "").strip()
+    mysql_database: str = os.getenv("MYSQL_DATABASE", "smart_academy").strip()
     db_path: Path = Path(
         os.getenv("DATABASE_PATH", str(ROOT / "data" / "sac.db"))
     ).resolve()
@@ -61,8 +84,73 @@ class Settings:
     smtp_pass: str = os.getenv("SMTP_PASS", "").strip()
     email_from: str = os.getenv("EMAIL_FROM", "noreply@smartacademy.cd").strip()
     cross_origin_auth: bool = os.getenv("CROSS_ORIGIN_AUTH", "false").lower() == "true"
+    api_page_default: int = int(os.getenv("API_PAGE_DEFAULT", "50"))
+    api_page_max: int = int(os.getenv("API_PAGE_MAX", "200"))
+
+    @property
+    def use_mysql(self) -> bool:
+        if os.getenv("DATABASE_BACKEND", "").lower() == "sqlite":
+            return False
+        if self.database_url:
+            return True
+        if os.getenv("DATABASE_BACKEND", "").lower() == "mysql":
+            return True
+        return bool(self.mysql_password and self.mysql_database)
+
+    @property
+    def mysql_config(self) -> dict:
+        if self.database_url:
+            return _parse_database_url(self.database_url)
+        return {
+            "host": self.mysql_host,
+            "port": self.mysql_port,
+            "user": self.mysql_user,
+            "password": self.mysql_password,
+            "database": self.mysql_database,
+        }
+
+    @property
+    def database_backend(self) -> str:
+        return "mysql" if self.use_mysql else "sqlite"
+
+    def ensure_storage_dirs(self) -> None:
+        if not self.use_mysql:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def uploads_on_render_disk(self) -> bool:
+        return str(self.upload_dir).startswith("/data")
+
+    @property
+    def persistence_on_render_disk(self) -> bool:
+        """Compatibilité health check — uploads persistants sur Render."""
+        return self.uploads_on_render_disk
 
 
 settings = Settings()
 if settings.frontend_url and settings.frontend_url not in settings.allowed_origins:
     settings.allowed_origins.append(settings.frontend_url)
+
+
+def _validate_production_config() -> None:
+    if not settings.is_prod:
+        return
+    if not settings.use_mysql:
+        raise RuntimeError(
+            "MySQL obligatoire en production. Définissez DATABASE_URL ou "
+            "MYSQL_HOST + MYSQL_USER + MYSQL_PASSWORD + MYSQL_DATABASE."
+        )
+    cfg = settings.mysql_config
+    if not cfg.get("host") or not cfg.get("database"):
+        raise RuntimeError("Configuration MySQL incomplète (host ou database manquant).")
+    if not settings.database_url and not settings.mysql_password:
+        raise RuntimeError("MYSQL_PASSWORD ou DATABASE_URL requis en production.")
+    if os.getenv("RENDER", "").lower() == "true" and not settings.uploads_on_render_disk:
+        raise RuntimeError(
+            "Sur Render, les fichiers uploadés doivent être sur le disque persistant : "
+            f"UPLOAD_DIR={settings.upload_dir}. Montez /data et utilisez UPLOAD_DIR=/data/uploads."
+        )
+
+
+_validate_production_config()

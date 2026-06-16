@@ -12,11 +12,70 @@ from app.utils.sanitize import (
 from app.utils.visibility import SOURCE_BY_ROLE, student_sees_document
 
 
-def get_all_documents() -> list[dict]:
+def get_all_documents(limit: int = 200, offset: int = 0) -> list[dict]:
     rows = get_db().execute(
-        "SELECT * FROM documents ORDER BY created_at DESC"
+        "SELECT * FROM documents ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        (limit, offset),
     ).fetchall()
     return [row_to_document(r) for r in rows]
+
+
+def get_documents_for_student(
+    student: dict,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    uni = student.get("universite")
+    niveau = student.get("niveau")
+    # Requête ciblée (évite de charger toute la table documents)
+    rows = get_db().execute(
+        """SELECT * FROM documents
+           WHERE (
+             source = 'administration'
+             AND (universite IS NULL OR universite = ?)
+           ) OR (
+             source IN ('professeur', 'assistant')
+             AND universite = ?
+             AND (niveau IS NULL OR niveau = ? OR ? IS NULL)
+           )
+           ORDER BY created_at DESC
+           LIMIT ? OFFSET ?""",
+        (uni, uni, niveau, niveau, limit * 3, offset),
+    ).fetchall()
+    docs = []
+    for r in rows:
+        d = row_to_document(r)
+        if d:
+            docs.append(d)
+    filtered = [d for d in docs if student_sees_document(student, d)]
+    return filtered[:limit]
+
+
+def get_my_documents(
+    user: dict,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    source = SOURCE_BY_ROLE.get(user.get("role"))
+    if not source:
+        return []
+    db = get_db()
+    if user.get("role") == "universite":
+        rows = db.execute(
+            """SELECT * FROM documents
+               WHERE source = 'administration'
+               AND (universite IS NULL OR universite = ?)
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (user.get("universite"), limit, offset),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT * FROM documents
+               WHERE source = ? AND author_id = ?
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (source, user["id"], limit, offset),
+        ).fetchall()
+    return [row_to_document(r) for r in rows if row_to_document(r)]
 
 
 def get_document_by_id(doc_id: str) -> dict | None:
@@ -24,23 +83,6 @@ def get_document_by_id(doc_id: str) -> dict | None:
         "SELECT * FROM documents WHERE id = ?", (doc_id,)
     ).fetchone()
     return row_to_document(row)
-
-
-def get_documents_for_student(student: dict) -> list[dict]:
-    return [d for d in get_all_documents() if student_sees_document(student, d)]
-
-
-def get_my_documents(user: dict) -> list[dict]:
-    source = SOURCE_BY_ROLE.get(user.get("role"))
-    if not source:
-        return []
-    if user.get("role") == "universite":
-        return [d for d in get_all_documents() if d["source"] == "administration"]
-    return [
-        d
-        for d in get_all_documents()
-        if d["source"] == source and d["authorId"] == user["id"]
-    ]
 
 
 def can_edit(user: dict | None, doc: dict | None) -> bool:

@@ -1,27 +1,32 @@
-# Render Blueprint — Smart Academy API (Python)
+# Render Blueprint — Smart Academy API (Python + MySQL)
 # https://render.com/docs/blueprint-spec
+#
+# MySQL : service externe (PlanetScale, Aiven, AWS RDS, etc.)
+# Render ne fournit pas MySQL natif — utilisez DATABASE_URL.
 
 services:
   - type: web
     name: sac-api-python
     runtime: python
     rootDir: backend-python
-    plan: starter
+    plan: standard
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 30
     healthCheckPath: /api/health
     autoDeploy: true
     disk:
-      name: sac-data
+      name: sac-uploads
       mountPath: /data
-      sizeGB: 1
+      sizeGB: 10
     envVars:
       - key: NODE_ENV
         value: production
       - key: COOKIE_SECURE
         value: true
-      - key: DATABASE_PATH
-        value: /data/sac.db
+      - key: DATABASE_BACKEND
+        value: mysql
+      - key: DATABASE_URL
+        sync: false
       - key: UPLOAD_DIR
         value: /data/uploads
       - key: JWT_ACCESS_SECRET

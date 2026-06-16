@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from app.database import get_db
+from app.database import get_db, is_duplicate_key_error
 from app.utils.platform_security import assert_campus_access, uid
 
 
@@ -295,7 +295,7 @@ def join_meeting(user: dict, meeting_id: str) -> dict:
             (uid("att"), meeting_id, user["email"], name, user.get("role"), _now()),
         )
     except Exception as e:
-        if "UNIQUE" not in str(e):
+        if not is_duplicate_key_error(e):
             raise
     get_db().commit()
     return get_meeting(meeting_id)

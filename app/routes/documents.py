@@ -1,11 +1,12 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.services import document_service
+from app.utils.pagination import clamp_page
 from app.utils.visibility import SOURCE_BY_ROLE, student_sees_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -43,7 +44,17 @@ async def _save_uploads(files: list[UploadFile]) -> list[dict]:
 
 
 @router.get("")
-def list_documents(user: dict = Depends(get_current_user)):
+def list_documents(
+    user: dict = Depends(get_current_user),
+    limit: int | None = Query(None, ge=1),
+    offset: int | None = Query(None, ge=0),
+):
+    page_limit, page_offset = clamp_page(
+        limit,
+        offset,
+        default=settings.api_page_default,
+        maximum=settings.api_page_max,
+    )
     if user["role"] == "etudiant":
         student = {
             "universite": user.get("universite"),
@@ -51,10 +62,23 @@ def list_documents(user: dict = Depends(get_current_user)):
             "niveau": user.get("niveau"),
             "email": user.get("email"),
         }
-        return {"documents": document_service.get_documents_for_student(student)}
-    if user["role"] in PUBLISH_ROLES:
-        return {"documents": document_service.get_my_documents(user)}
-    return {"documents": []}
+        docs = document_service.get_documents_for_student(
+            student, limit=page_limit, offset=page_offset
+        )
+    elif user["role"] in PUBLISH_ROLES:
+        docs = document_service.get_my_documents(
+            user, limit=page_limit, offset=page_offset
+        )
+    else:
+        docs = []
+    return {
+        "documents": docs,
+        "pagination": {
+            "limit": page_limit,
+            "offset": page_offset,
+            "hasMore": len(docs) == page_limit,
+        },
+    }
 
 
 @router.get("/{doc_id}")

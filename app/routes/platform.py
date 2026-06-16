@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from pathlib import Path
 
+from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.services import ai_correction_service, audit_service, meeting_service, platform_service
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
+from app.utils.pagination import clamp_page
 
 router = APIRouter(prefix="/platform", tags=["platform"])
 
@@ -25,22 +27,37 @@ def verify_diploma_route(body: dict, request: Request):
 
 
 @router.get("/grades/me")
-def grades_me(user: dict = Depends(get_current_user)):
+def grades_me(
+    user: dict = Depends(get_current_user),
+    limit: int | None = Query(None, ge=1),
+    offset: int | None = Query(None, ge=0),
+):
+    page_limit, page_offset = clamp_page(
+        limit,
+        offset,
+        default=settings.api_page_default,
+        maximum=settings.api_page_max,
+    )
     role = user.get("role")
     if role == "professeur":
-        return {
-            "grades": platform_service.list_grades_for_professor(
-                user["email"], user["universite"]
-            )
-        }
-    if role in ("assistant", "universite"):
-        return {
-            "grades": platform_service.list_grades_for_campus(user["universite"])
-        }
-    return {
-        "grades": platform_service.list_grades_for_student(
-            user["email"], user["universite"]
+        grades = platform_service.list_grades_for_professor(
+            user["email"], user["universite"], page_limit, page_offset
         )
+    elif role in ("assistant", "universite"):
+        grades = platform_service.list_grades_for_campus(
+            user["universite"], page_limit, page_offset
+        )
+    else:
+        grades = platform_service.list_grades_for_student(
+            user["email"], user["universite"], page_limit, page_offset
+        )
+    return {
+        "grades": grades,
+        "pagination": {
+            "limit": page_limit,
+            "offset": page_offset,
+            "hasMore": len(grades) == page_limit,
+        },
     }
 
 

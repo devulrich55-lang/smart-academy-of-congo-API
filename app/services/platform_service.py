@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from app.database import get_db
+from app.database import get_db, is_duplicate_key_error
 from app.utils.platform_security import (
     assert_campus_access,
     generate_diploma_number,
@@ -49,29 +49,38 @@ def _row_to_grade(r) -> dict:
     }
 
 
-def list_grades_for_student(email: str, universite: str) -> list[dict]:
+def list_grades_for_student(
+    email: str, universite: str, limit: int = 50, offset: int = 0
+) -> list[dict]:
     rows = get_db().execute(
         """SELECT * FROM grades WHERE student_email = ? COLLATE NOCASE
-           AND universite = ? ORDER BY semester DESC, course_name""",
-        (email, universite),
+           AND universite = ? ORDER BY semester DESC, course_name
+           LIMIT ? OFFSET ?""",
+        (email, universite, limit, offset),
     ).fetchall()
     return [_row_to_grade(r) for r in rows]
 
 
-def list_grades_for_professor(prof_email: str, universite: str) -> list[dict]:
+def list_grades_for_professor(
+    prof_email: str, universite: str, limit: int = 50, offset: int = 0
+) -> list[dict]:
     rows = get_db().execute(
         """SELECT * FROM grades WHERE professor_email = ? COLLATE NOCASE
-           AND universite = ? ORDER BY updated_at DESC""",
-        (prof_email, universite),
+           AND universite = ? ORDER BY updated_at DESC
+           LIMIT ? OFFSET ?""",
+        (prof_email, universite, limit, offset),
     ).fetchall()
     return [_row_to_grade(r) for r in rows]
 
 
-def list_grades_for_campus(universite: str) -> list[dict]:
+def list_grades_for_campus(
+    universite: str, limit: int = 50, offset: int = 0
+) -> list[dict]:
     rows = get_db().execute(
         """SELECT * FROM grades WHERE universite = ?
-           ORDER BY semester DESC, student_email, course_name""",
-        (universite,),
+           ORDER BY semester DESC, student_email, course_name
+           LIMIT ? OFFSET ?""",
+        (universite, limit, offset),
     ).fetchall()
     return [_row_to_grade(r) for r in rows]
 
@@ -480,7 +489,7 @@ def enroll_course(student_email: str, course_id: str) -> dict:
         db.commit()
         return {"id": enr_id, "courseId": course_id, "studentEmail": student_email, "progress": 0, "enrolledAt": ts}
     except Exception as e:
-        if "UNIQUE" in str(e):
+        if is_duplicate_key_error(e):
             return {"courseId": course_id, "studentEmail": student_email, "progress": 0}
         raise
 
@@ -989,7 +998,7 @@ def join_live_session(user: dict, session_id: str) -> dict:
             (attendee_id, session_id, user["email"], name, now),
         )
     except Exception as e:
-        if "UNIQUE" not in str(e):
+        if not is_duplicate_key_error(e):
             raise
     get_db().commit()
     session = get_live_session(session_id)

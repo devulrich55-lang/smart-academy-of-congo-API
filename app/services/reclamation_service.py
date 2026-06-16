@@ -255,14 +255,16 @@ def update_section(actor: dict, section_id: str, data: dict) -> dict:
     return _row_to_section(row)
 
 
-def list_reclamations_for_actor(actor: dict) -> list[dict]:
+def list_reclamations_for_actor(
+    actor: dict, limit: int = 50, offset: int = 0
+) -> list[dict]:
     role = actor.get("role")
     db = get_db()
     if role == "etudiant":
         rows = db.execute(
             """SELECT * FROM reclamations WHERE student_email = ? COLLATE NOCASE
-               ORDER BY created_at DESC""",
-            (actor["email"],),
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (actor["email"], limit, offset),
         ).fetchall()
         return [_row_to_reclamation(r) for r in rows]
     if role == "section" or (role == "professeur" and _is_section_head_actor(actor)):
@@ -271,8 +273,8 @@ def list_reclamations_for_actor(actor: dict) -> list[dict]:
             return []
         rows = db.execute(
             """SELECT * FROM reclamations WHERE section_id = ?
-               ORDER BY created_at DESC""",
-            (section_id,),
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (section_id, limit, offset),
         ).fetchall()
         return [_row_to_reclamation(r) for r in rows]
     if role == "universite":
@@ -281,16 +283,16 @@ def list_reclamations_for_actor(actor: dict) -> list[dict]:
             """SELECT r.* FROM reclamations r
                INNER JOIN faculty_sections s ON s.id = r.section_id
                WHERE s.universite = ?
-               ORDER BY r.created_at DESC""",
-            (campus,),
+               ORDER BY r.created_at DESC LIMIT ? OFFSET ?""",
+            (campus, limit, offset),
         ).fetchall()
         return [_row_to_reclamation(r) for r in rows]
     if role == "assistant":
         campus = _campus_for_actor(actor)
         rows = db.execute(
             """SELECT * FROM reclamations WHERE universite = ?
-               ORDER BY created_at DESC""",
-            (campus,),
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (campus, limit, offset),
         ).fetchall()
         return [_row_to_reclamation(r) for r in rows]
     return []
