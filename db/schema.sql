@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
+  code_hash TEXT,
   expires_at TEXT NOT NULL,
   used_at TEXT,
   created_at TEXT NOT NULL,
@@ -102,3 +103,4 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_reset_hash ON password_reset_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_reset_code ON password_reset_tokens(code_hash);

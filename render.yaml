@@ -15,18 +15,20 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     disk:
-      name: sac-uploads
+      name: sac-data
       mountPath: /data
-      sizeGB: 10
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: COOKIE_SECURE
         value: true
+      # Mode test (défaut) : SQLite sur disque /data — voir MODE-TEST-RENDER.md
+      # Pour MySQL en prod : DATABASE_BACKEND=mysql + DATABASE_URL
       - key: DATABASE_BACKEND
-        value: mysql
-      - key: DATABASE_URL
-        sync: false
+        value: sqlite
+      - key: DATABASE_PATH
+        value: /data/sac.db
       - key: UPLOAD_DIR
         value: /data/uploads
       - key: JWT_ACCESS_SECRET

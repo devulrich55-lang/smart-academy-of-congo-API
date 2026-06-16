@@ -20,6 +20,7 @@ from app.config import settings
 
 from app.database import get_db
 from app.database_maintenance import run_maintenance
+from app.services.email_service import smtp_configured
 
 from app.middleware.security import (
 
@@ -147,10 +148,15 @@ def health(request: Request):
         "database": "up" if db_ok else "down",
         "storage": {
             "backend": settings.database_backend,
+            "mode": "mysql" if settings.use_mysql else "sqlite-test",
             "mysqlHost": settings.mysql_config.get("host") if settings.use_mysql else None,
             "mysqlDatabase": settings.mysql_config.get("database") if settings.use_mysql else None,
+            "databasePath": str(settings.db_path) if not settings.use_mysql else None,
             "uploadDir": str(settings.upload_dir),
+            "dbOnRenderDisk": settings.db_on_render_disk,
             "uploadsOnRenderDisk": settings.uploads_on_render_disk,
+            "persistentOnRenderDisk": settings.persistence_on_render_disk,
+            "emailConfigured": smtp_configured(),
             "userCount": user_count,
             "documentCount": doc_count,
         },

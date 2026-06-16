@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id VARCHAR(36) PRIMARY KEY,
   user_id VARCHAR(36) NOT NULL,
   token_hash VARCHAR(255) NOT NULL,
+  code_hash VARCHAR(255) NULL,
   expires_at VARCHAR(40) NOT NULL,
   used_at VARCHAR(40) NULL,
   created_at VARCHAR(40) NOT NULL,
@@ -113,6 +114,7 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX idx_reset_user ON password_reset_tokens(user_id);
+CREATE INDEX idx_reset_code ON password_reset_tokens(code_hash);
 
 CREATE TABLE IF NOT EXISTS grades (
   id VARCHAR(36) PRIMARY KEY,

@@ -36,3 +36,8 @@ def generate_refresh_token_raw() -> str:
 
 def generate_reset_token_raw() -> str:
     return secrets.token_urlsafe(48)
+
+
+def generate_reset_code() -> str:
+    """Code numérique à 6 chiffres pour réinitialisation par e-mail."""
+    return f"{secrets.randbelow(1_000_000):06d}"

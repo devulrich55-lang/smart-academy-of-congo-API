@@ -78,11 +78,15 @@ class Settings:
     frontend_root: Path = ROOT.parent
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5500").rstrip("/")
     reset_token_hours: int = int(os.getenv("RESET_TOKEN_HOURS", "1"))
+    gmail_user: str = os.getenv("GMAIL_USER", "").strip()
+    gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "").strip()
     smtp_host: str = os.getenv("SMTP_HOST", "").strip()
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
     smtp_user: str = os.getenv("SMTP_USER", "").strip()
     smtp_pass: str = os.getenv("SMTP_PASS", "").strip()
-    email_from: str = os.getenv("EMAIL_FROM", "noreply@smartacademy.cd").strip()
+    smtp_use_tls: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    smtp_use_ssl: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+    email_from: str = os.getenv("EMAIL_FROM", "").strip()
     cross_origin_auth: bool = os.getenv("CROSS_ORIGIN_AUTH", "false").lower() == "true"
     api_page_default: int = int(os.getenv("API_PAGE_DEFAULT", "50"))
     api_page_max: int = int(os.getenv("API_PAGE_MAX", "200"))
@@ -123,12 +127,35 @@ class Settings:
         return str(self.upload_dir).startswith("/data")
 
     @property
+    def db_on_render_disk(self) -> bool:
+        return str(self.db_path).startswith("/data")
+
+    @property
     def persistence_on_render_disk(self) -> bool:
-        """Compatibilité health check — uploads persistants sur Render."""
-        return self.uploads_on_render_disk
+        """Comptes + uploads persistants sur le disque Render /data."""
+        if self.use_mysql:
+            return self.uploads_on_render_disk
+        return self.db_on_render_disk and self.uploads_on_render_disk
 
 
 settings = Settings()
+
+# Gmail : raccourci — GMAIL_USER + GMAIL_APP_PASSWORD suffisent
+if settings.gmail_user and settings.gmail_app_password:
+    if not settings.smtp_host:
+        settings.smtp_host = "smtp.gmail.com"
+    if not settings.smtp_user:
+        settings.smtp_user = settings.gmail_user
+    if not settings.smtp_pass:
+        settings.smtp_pass = settings.gmail_app_password.replace(" ", "")
+    if not settings.email_from:
+        settings.email_from = settings.gmail_user
+    if os.getenv("SMTP_PORT") is None and not settings.smtp_use_ssl:
+        settings.smtp_port = 587
+
+if not settings.email_from:
+    settings.email_from = "noreply@smartacademy.cd"
+
 if settings.frontend_url and settings.frontend_url not in settings.allowed_origins:
     settings.allowed_origins.append(settings.frontend_url)
 
@@ -136,21 +163,33 @@ if settings.frontend_url and settings.frontend_url not in settings.allowed_origi
 def _validate_production_config() -> None:
     if not settings.is_prod:
         return
-    if not settings.use_mysql:
-        raise RuntimeError(
-            "MySQL obligatoire en production. Définissez DATABASE_URL ou "
-            "MYSQL_HOST + MYSQL_USER + MYSQL_PASSWORD + MYSQL_DATABASE."
-        )
-    cfg = settings.mysql_config
-    if not cfg.get("host") or not cfg.get("database"):
-        raise RuntimeError("Configuration MySQL incomplète (host ou database manquant).")
-    if not settings.database_url and not settings.mysql_password:
-        raise RuntimeError("MYSQL_PASSWORD ou DATABASE_URL requis en production.")
-    if os.getenv("RENDER", "").lower() == "true" and not settings.uploads_on_render_disk:
-        raise RuntimeError(
-            "Sur Render, les fichiers uploadés doivent être sur le disque persistant : "
-            f"UPLOAD_DIR={settings.upload_dir}. Montez /data et utilisez UPLOAD_DIR=/data/uploads."
-        )
+
+    on_render = os.getenv("RENDER", "").lower() == "true"
+
+    if settings.use_mysql:
+        cfg = settings.mysql_config
+        if not cfg.get("host") or not cfg.get("database"):
+            raise RuntimeError("Configuration MySQL incomplète (host ou database manquant).")
+        if not settings.database_url and not settings.mysql_password:
+            raise RuntimeError("MYSQL_PASSWORD ou DATABASE_URL requis en production.")
+        if on_render and not settings.uploads_on_render_disk:
+            raise RuntimeError(
+                "Sur Render, les fichiers uploadés doivent être sur le disque persistant : "
+                f"UPLOAD_DIR={settings.upload_dir}. Montez /data et utilisez UPLOAD_DIR=/data/uploads."
+            )
+        return
+
+    # Mode test / budget : SQLite sur disque persistant Render (jusqu'à ~5 000 comptes)
+    if on_render:
+        if not settings.db_on_render_disk:
+            raise RuntimeError(
+                "Mode test SQLite sur Render : montez le disque /data et définissez "
+                "DATABASE_PATH=/data/sac.db pour ne pas perdre les comptes au redéploiement."
+            )
+        if not settings.uploads_on_render_disk:
+            raise RuntimeError(
+                "Sur Render, UPLOAD_DIR doit être /data/uploads avec le disque /data monté."
+            )
 
 
 _validate_production_config()

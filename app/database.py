@@ -123,6 +123,44 @@ def _init_mysql_schema(conn) -> None:
     cur.close()
 
 
+def _migrate_reset_code_column(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "ALTER TABLE password_reset_tokens "
+                "ADD COLUMN code_hash VARCHAR(255) NULL"
+            )
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:  # duplicate column
+                raise
+        try:
+            cur.execute(
+                "CREATE INDEX idx_reset_code ON password_reset_tokens(code_hash)"
+            )
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] not in (1061, 1060):
+                raise
+        cur.close()
+        return
+
+    try:
+        conn.execute("ALTER TABLE password_reset_tokens ADD COLUMN code_hash TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reset_code "
+            "ON password_reset_tokens(code_hash)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -136,6 +174,7 @@ def _connect_mysql() -> SACDatabase:
         autocommit=False,
     )
     _init_mysql_schema(conn)
+    _migrate_reset_code_column(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -203,12 +242,15 @@ def _connect_sqlite() -> SACDatabase:
         "CREATE INDEX IF NOT EXISTS idx_docs_created ON documents(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_refresh_expires ON refresh_tokens(expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_users_universite ON users(universite, role)",
+        "ALTER TABLE password_reset_tokens ADD COLUMN code_hash TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_reset_code ON password_reset_tokens(code_hash)",
     ):
         try:
             conn.execute(stmt)
         except sqlite3.OperationalError:
             pass
     _migrate_users_section_role_sqlite(conn)
+    _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
 

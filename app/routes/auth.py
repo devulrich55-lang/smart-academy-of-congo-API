@@ -4,7 +4,11 @@ from app.config import settings
 from app.deps import get_current_user
 from app.rate_limit import limiter
 from app.services import auth_service
-from app.services.password_reset_service import request_password_reset, reset_password
+from app.services.password_reset_service import (
+    request_password_reset,
+    reset_password,
+    reset_password_with_code,
+)
 from app.services.user_service import create_user, find_user_by_id, user_to_session
 from app.utils.guards import strip_identity_fields
 from app.utils.sanitize import validate_email_strict, validate_password
@@ -191,7 +195,7 @@ def forgot_password_route(request: Request, body: dict):
     request_password_reset(str(email).strip())
     return {
         "ok": True,
-        "message": "Si un compte existe avec cet e-mail, un lien de réinitialisation a été envoyé.",
+        "message": "Si un compte existe avec cet e-mail, un code à 6 chiffres vous a été envoyé par e-mail (vérifiez Gmail et les spams).",
     }
 
 
@@ -200,15 +204,30 @@ def forgot_password_route(request: Request, body: dict):
 def reset_password_route(request: Request, body: dict):
     token = body.get("token")
     password = body.get("password")
-    if not token or not password:
+    email = body.get("email")
+    code = body.get("code")
+    if not password:
         from fastapi import HTTPException
 
         raise HTTPException(
             status_code=400,
-            detail={"error": "MISSING_FIELDS", "message": "Token et nouveau mot de passe requis"},
+            detail={"error": "MISSING_FIELDS", "message": "Nouveau mot de passe requis"},
         )
     try:
-        reset_password(str(token).strip(), password)
+        if token:
+            reset_password(str(token).strip(), password)
+        elif email and code:
+            reset_password_with_code(str(email).strip(), str(code).strip(), password)
+        else:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "MISSING_FIELDS",
+                    "message": "Lien (token) ou e-mail + code requis",
+                },
+            )
         return {"ok": True, "message": "Mot de passe mis à jour. Vous pouvez vous connecter."}
     except ValueError as e:
         _map_error(e)

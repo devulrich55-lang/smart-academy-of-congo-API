@@ -1,6 +1,13 @@
 # Montée en charge — Smart Academy API
 
-Ce guide décrit la configuration pour garder la plateforme **stable** avec jusqu’à **~50 000 comptes** (et plus avec MySQL dimensionné).
+Ce guide décrit la configuration pour garder la plateforme **stable**.
+
+## Mode test (sans budget MySQL)
+
+Pour **30 à 5 000 comptes** en phase de test : **SQLite + disque `/data` sur Render**.  
+Voir **`MODE-TEST-RENDER.md`** — coût ~disque 1 Go seulement, pas de PlanetScale.
+
+## Architecture production (projet financé)
 
 ## Architecture actuelle
 
@@ -46,6 +53,8 @@ GET /api/health
 
 | Charge | Recommandation |
 |---|---|
+| 30–500 comptes test | SQLite + disque Render 1 Go ✅ (`MODE-TEST-RENDER.md`) |
+| 5k comptes, usage normal | MySQL entrée de gamme + API Render Standard |
 | 50k comptes, usage normal | MySQL Standard + API Render Standard ✅ |
 | Pics examens / notes | MySQL plan supérieur, index OK |
 | 50k connexions simultanées | MySQL cluster + cache Redis + CDN |
