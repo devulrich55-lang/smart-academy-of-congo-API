@@ -24,7 +24,13 @@ def get_current_user(
         decoded = verify_access_token(token)
         user = find_user_by_id(decoded["sub"])
         if not user:
-            raise HTTPException(status_code=401, detail={"error": "USER_NOT_FOUND"})
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "USER_NOT_FOUND",
+                    "message": "Session expirée ou compte introuvable — reconnectez-vous.",
+                },
+            )
         request.state.user = user
         request.state.session = user_to_session(user)
         return user
