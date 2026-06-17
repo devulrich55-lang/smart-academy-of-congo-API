@@ -149,8 +149,8 @@ def create_user(profile: dict) -> dict:
           filiere, niveau, matricule, date_naissance, departement, grade, service,
           fonction, num_employe, num_assist, nom_universite, sigle, ville, adresse,
           nb_etudiants, site_web, responsable, code_uni, cours_classes, payment,
-          inscription_fee, section_id, created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          inscription_fee, classe, section_id, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             user_id,
             email,
@@ -183,6 +183,7 @@ def create_user(profile: dict) -> dict:
             json.dumps(profile["inscriptionFee"])
             if profile.get("inscriptionFee")
             else None,
+            clean_text(profile.get("classe"), 150) or None,
             clean_text(profile.get("sectionId"), 80) or None,
             now,
             now,
@@ -218,6 +219,7 @@ def user_to_session(user: dict | None) -> dict | None:
         "codeUni": user.get("codeUni"),
         "sigle": user.get("sigle"),
         "matricule": user.get("matricule"),
+        "classe": user.get("classe"),
         "sectionId": user.get("sectionId"),
         "sectionName": user.get("sectionName"),
         "nomination": user.get("nomination"),

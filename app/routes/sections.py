@@ -156,6 +156,7 @@ def create_student_route(
             "nom": body.get("nom"),
             "matricule": body.get("matricule"),
             "niveau": body.get("niveau"),
+            "classe": body.get("classe"),
             "dateNaissance": body.get("dateNaissance"),
             "filiere": body.get("filiere"),
             "sectionId": body.get("sectionId"),

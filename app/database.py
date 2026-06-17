@@ -161,6 +161,24 @@ def _migrate_reset_code_column(conn, backend: str) -> None:
         pass
 
 
+def _migrate_users_classe_column(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN classe VARCHAR(150) NULL")
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
+        cur.close()
+        return
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN classe TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -175,6 +193,7 @@ def _connect_mysql() -> SACDatabase:
     )
     _init_mysql_schema(conn)
     _migrate_reset_code_column(conn, "mysql")
+    _migrate_users_classe_column(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -230,6 +249,7 @@ def _connect_sqlite() -> SACDatabase:
         "ALTER TABLE users ADD COLUMN campus_tariffs TEXT",
         "ALTER TABLE users ADD COLUMN section_id TEXT",
         "ALTER TABLE users ADD COLUMN nomination TEXT",
+        "ALTER TABLE users ADD COLUMN classe TEXT",
         "ALTER TABLE documents ADD COLUMN attachments TEXT DEFAULT '[]'",
         "ALTER TABLE documents ADD COLUMN section_id TEXT",
         "ALTER TABLE documents ADD COLUMN section_name TEXT",
@@ -302,6 +322,7 @@ def row_to_user(row: Any | None) -> dict[str, Any] | None:
         "inscriptionFee": _json_load(row["inscription_fee"], None),
         "campusTariffs": _json_load(row["campus_tariffs"], None),
         "sectionId": row["section_id"] if "section_id" in keys else None,
+        "classe": row["classe"] if "classe" in keys else None,
         "nomination": row["nomination"] if "nomination" in keys else None,
         "createdAt": row["created_at"],
     }

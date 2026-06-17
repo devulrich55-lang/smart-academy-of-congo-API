@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   universite VARCHAR(80) NULL,
   filiere VARCHAR(200) NULL,
   niveau VARCHAR(40) NULL,
+  classe VARCHAR(150) NULL,
   matricule VARCHAR(80) NULL,
   date_naissance VARCHAR(20) NULL,
   departement VARCHAR(120) NULL,

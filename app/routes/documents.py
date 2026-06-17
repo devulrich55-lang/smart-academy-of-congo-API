@@ -60,6 +60,8 @@ def list_documents(
             "universite": user.get("universite"),
             "filiere": user.get("filiere"),
             "niveau": user.get("niveau"),
+            "classe": user.get("classe"),
+            "sectionId": user.get("sectionId"),
             "email": user.get("email"),
         }
         docs = document_service.get_documents_for_student(
@@ -91,6 +93,8 @@ def get_document(doc_id: str, user: dict = Depends(get_current_user)):
             "universite": user.get("universite"),
             "filiere": user.get("filiere"),
             "niveau": user.get("niveau"),
+            "classe": user.get("classe"),
+            "sectionId": user.get("sectionId"),
         }
         if not student_sees_document(student, doc):
             raise HTTPException(status_code=403, detail={"error": "FORBIDDEN"})

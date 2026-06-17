@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   universite TEXT,
   filiere TEXT,
   niveau TEXT,
+  classe TEXT,
   matricule TEXT,
   date_naissance TEXT,
   departement TEXT,
