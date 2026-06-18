@@ -59,7 +59,7 @@ class Settings:
         os.getenv("UPLOAD_DIR", str(ROOT / "uploads"))
     ).resolve()
     allowed_origins: list[str] = [
-        o.strip()
+        o.strip().rstrip("/")
         for o in os.getenv(
             "ALLOWED_ORIGINS",
             "http://localhost:8000,http://127.0.0.1:8000,"
@@ -164,8 +164,8 @@ if settings.gmail_user and settings.gmail_app_password:
 if not settings.email_from:
     settings.email_from = "noreply@smartacademy.cd"
 
-if settings.frontend_url and settings.frontend_url not in settings.allowed_origins:
-    settings.allowed_origins.append(settings.frontend_url)
+if settings.frontend_url and settings.frontend_url.rstrip("/") not in settings.allowed_origins:
+    settings.allowed_origins.append(settings.frontend_url.rstrip("/"))
 
 
 def _render_data_writable() -> bool:

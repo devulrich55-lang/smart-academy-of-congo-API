@@ -69,13 +69,12 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-
     title="Smart Academy API",
-
     version="1.0.0",
-
     lifespan=lifespan,
-
+    docs_url=None if settings.is_prod else "/docs",
+    redoc_url=None if settings.is_prod else "/redoc",
+    openapi_url=None if settings.is_prod else "/openapi.json",
 )
 
 app.state.limiter = limiter
@@ -103,7 +102,7 @@ app.add_middleware(
 
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_headers=["*"],
 
 )
 
@@ -133,6 +132,10 @@ def health(request: Request):
     db_ok = False
     user_count = 0
     doc_count = 0
+    request_origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    origin_allowed = (
+        not request_origin or request_origin in settings.allowed_origins
+    )
     try:
         db = get_db()
         db.execute("SELECT 1").fetchone()
@@ -141,6 +144,23 @@ def health(request: Request):
         doc_count = db.execute("SELECT COUNT(*) AS c FROM documents").fetchone()["c"]
     except Exception:
         db_ok = False
+    if settings.is_prod:
+        return {
+            "ok": db_ok,
+            "service": "Smart Academy API",
+            "version": "1.0.0",
+            "database": "up" if db_ok else "down",
+            "storage": {
+                "persistentOnRenderDisk": settings.persistence_on_render_disk,
+                "emailConfigured": smtp_configured(),
+            },
+            "cors": {
+                "requestOrigin": request_origin or None,
+                "originAllowed": origin_allowed,
+                "configuredOrigins": len(settings.allowed_origins),
+            },
+        }
+
     return {
         "ok": db_ok,
         "service": "Smart Academy API",
