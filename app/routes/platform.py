@@ -611,6 +611,31 @@ def orientation(body: dict, request: Request, user: dict = Depends(require_roles
     return {"advice": advice}
 
 
+@router.post("/presence/ping")
+def ping_presence(body: dict, user: dict = Depends(get_current_user)):
+    try:
+        payload = pick_fields(body or {}, "classe", "filiere", "sectionId")
+        return platform_service.upsert_presence(user, payload)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/presence/section")
+def section_presence(user: dict = Depends(require_roles("section", "assistant", "universite"))):
+    try:
+        return platform_service.section_presence_summary(user)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/presence/classes")
+def professor_presence(user: dict = Depends(require_roles("professeur"))):
+    try:
+        return platform_service.professor_presence_by_class(user)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
 def _handle_platform_error(exc: ValueError) -> None:
     code = str(exc)
     if code == "AUTH_REQUIRED":

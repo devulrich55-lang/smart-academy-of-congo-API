@@ -221,3 +221,19 @@ CREATE TABLE IF NOT EXISTS meeting_attendees (
 
 CREATE INDEX IF NOT EXISTS idx_meetings_uni ON meetings(universite, type, status);
 CREATE INDEX IF NOT EXISTS idx_meetings_section ON meetings(section_id);
+
+-- Présence en ligne (heartbeat)
+CREATE TABLE IF NOT EXISTS online_presence (
+  id TEXT PRIMARY KEY,
+  user_email TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  universite TEXT NOT NULL,
+  filiere TEXT,
+  section_id TEXT,
+  classe TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_presence_uni_updated ON online_presence(universite, updated_at);
+CREATE INDEX IF NOT EXISTS idx_presence_section ON online_presence(section_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_presence_classe ON online_presence(classe, updated_at);

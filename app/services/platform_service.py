@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.database import get_db, is_duplicate_key_error
 from app.utils.platform_security import (
@@ -14,6 +14,22 @@ from app.utils.platform_security import (
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _active_presence_cutoff(seconds: int = 90) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
 
 
 def compute_grade_avg(cc: float, exam: float) -> float:
@@ -1019,3 +1035,113 @@ def update_live_recording(user: dict, session_id: str, recording_url: str) -> di
     )
     get_db().commit()
     return get_live_session(session_id)
+
+
+def upsert_presence(user: dict, data: dict | None = None) -> dict:
+    payload = data or {}
+    now = _now()
+    db = get_db()
+
+    classe = payload.get("classe") or user.get("classe")
+    filiere = payload.get("filiere") or user.get("filiere")
+    section_id = payload.get("sectionId") or user.get("sectionId")
+    role = user.get("role") or "etudiant"
+    email = (user.get("email") or "").strip().lower()
+    universite = user.get("universite")
+
+    if not email or not universite:
+        raise ValueError("INVALID_INPUT")
+
+    existing = db.execute(
+        "SELECT user_email FROM online_presence WHERE user_email=? COLLATE NOCASE",
+        (email,),
+    ).fetchone()
+    if existing:
+        db.execute(
+            """UPDATE online_presence
+               SET role=?, universite=?, filiere=?, section_id=?, classe=?, updated_at=?
+               WHERE user_email=? COLLATE NOCASE""",
+            (role, universite, filiere, section_id, classe, now, email),
+        )
+    else:
+        db.execute(
+            """INSERT INTO online_presence
+               (id, user_email, role, universite, filiere, section_id, classe, updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (uid("prs"), email, role, universite, filiere, section_id, classe, now),
+        )
+    db.commit()
+    return {"ok": True, "updatedAt": now}
+
+
+def section_presence_summary(user: dict) -> dict:
+    if user.get("role") not in ("section", "universite", "assistant"):
+        raise ValueError("FORBIDDEN")
+    uni = user.get("universite")
+    if not uni:
+        raise ValueError("INVALID_INPUT")
+
+    section_id = user.get("sectionId")
+    filiere = user.get("filiere")
+    cutoff = _active_presence_cutoff(90)
+    db = get_db()
+
+    q = """SELECT user_email, role, classe, updated_at FROM online_presence
+           WHERE universite=? AND updated_at >= ?"""
+    params: list = [uni, cutoff]
+    if section_id:
+        q += " AND (section_id = ? OR (section_id IS NULL AND filiere = ?))"
+        params.extend([section_id, filiere])
+    elif filiere:
+        q += " AND filiere = ?"
+        params.append(filiere)
+    q += " ORDER BY updated_at DESC"
+
+    rows = db.execute(q, params).fetchall()
+    role_counts = {"etudiant": 0, "professeur": 0, "section": 0, "assistant": 0, "universite": 0}
+    for r in rows:
+        rr = r["role"] or ""
+        if rr in role_counts:
+            role_counts[rr] += 1
+
+    return {
+        "onlineCount": len(rows),
+        "roleCounts": role_counts,
+        "updatedAt": _now(),
+    }
+
+
+def professor_presence_by_class(user: dict) -> dict:
+    if user.get("role") != "professeur":
+        raise ValueError("FORBIDDEN")
+    uni = user.get("universite")
+    if not uni:
+        raise ValueError("INVALID_INPUT")
+
+    raw_classes = user.get("coursClasses") or []
+    class_names: list[str] = []
+    for item in raw_classes:
+        if not isinstance(item, dict):
+            continue
+        classe = str(item.get("classe") or "").strip()
+        if classe and classe not in class_names:
+            class_names.append(classe)
+
+    cutoff = _active_presence_cutoff(90)
+    db = get_db()
+    rows = db.execute(
+        """SELECT classe, COUNT(*) AS c FROM online_presence
+           WHERE universite=? AND role='etudiant' AND updated_at >= ?
+           GROUP BY classe""",
+        (uni, cutoff),
+    ).fetchall()
+    counts = {str(r["classe"] or ""): int(r["c"] or 0) for r in rows}
+
+    classes = []
+    total = 0
+    for name in class_names:
+        c = counts.get(name, 0)
+        total += c
+        classes.append({"classe": name, "onlineCount": c})
+
+    return {"onlineCount": total, "classes": classes, "updatedAt": _now()}

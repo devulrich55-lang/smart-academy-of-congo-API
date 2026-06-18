@@ -350,6 +350,22 @@ CREATE TABLE IF NOT EXISTS meeting_attendees (
 CREATE INDEX idx_meetings_uni ON meetings(universite, type, status);
 CREATE INDEX idx_meetings_section ON meetings(section_id);
 
+CREATE TABLE IF NOT EXISTS online_presence (
+  id VARCHAR(36) PRIMARY KEY,
+  user_email VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL,
+  universite VARCHAR(80) NOT NULL,
+  filiere VARCHAR(200) NULL,
+  section_id VARCHAR(80) NULL,
+  classe VARCHAR(150) NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  UNIQUE KEY uq_presence_email (user_email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_presence_uni_updated ON online_presence(universite, updated_at);
+CREATE INDEX idx_presence_section ON online_presence(section_id, updated_at);
+CREATE INDEX idx_presence_classe ON online_presence(classe, updated_at);
+
 CREATE TABLE IF NOT EXISTS work_submissions (
   id VARCHAR(36) PRIMARY KEY,
   student_email VARCHAR(255) NOT NULL,
