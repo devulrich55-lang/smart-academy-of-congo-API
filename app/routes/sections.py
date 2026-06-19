@@ -179,6 +179,7 @@ def list_students_route(user: dict = Depends(_require_student_delegate)):
                 "nom": s.get("nom"),
                 "matricule": s.get("matricule"),
                 "niveau": s.get("niveau"),
+                "classe": s.get("classe"),
                 "filiere": s.get("filiere"),
                 "sectionId": s.get("sectionId"),
                 "createdAt": s.get("createdAt"),

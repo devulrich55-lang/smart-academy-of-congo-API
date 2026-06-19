@@ -24,6 +24,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "0"
         if settings.is_prod:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        path = request.url.path
+        if path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
         return response
 
 

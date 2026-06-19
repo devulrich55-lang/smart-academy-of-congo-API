@@ -114,6 +114,17 @@ def register_route(request: Request, body: dict, response: Response):
             status_code=400,
             detail={"error": "INVALID_PHONE", "message": "Numéro de téléphone mobile requis"},
         )
+    role = str(body.get("role") or "").strip().lower()
+    if role in ("section", "universite"):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "FORBIDDEN",
+                "message": "Ce type de compte ne peut pas être créé via l'inscription publique.",
+            },
+        )
     try:
         profile = strip_identity_fields(body)
         profile["email"] = email
