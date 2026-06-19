@@ -227,3 +227,45 @@ def seed_demo_sections_if_missing() -> None:
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     _seed_demo_sections(db, now)
+
+
+INSTITUTIONAL_PASSWORD = "Admin2025!"
+
+
+def seed_institutional_admins_if_missing() -> None:
+    from app.services.user_service import create_user, find_user_by_email
+
+    seeds = [
+        {
+            "email": "admin@superadmin.cd",
+            "role": "superadmin",
+            "prenom": "Super",
+            "nom": "Admin",
+            "telephone": "+243 81 100 0001",
+        },
+        {
+            "email": "admin@ministere.cd",
+            "role": "ministere",
+            "prenom": "Ministere",
+            "nom": "Education",
+            "telephone": "+243 82 200 0002",
+        },
+    ]
+    created = []
+    for item in seeds:
+        if find_user_by_email(item["email"]):
+            continue
+        create_user(
+            {
+                **item,
+                "password": INSTITUTIONAL_PASSWORD,
+            }
+        )
+        created.append(item["email"])
+    if created:
+        print(
+            "[SAC] Comptes institutionnels créés:",
+            ", ".join(created),
+            "— mot de passe:",
+            INSTITUTIONAL_PASSWORD,
+        )

@@ -4,6 +4,7 @@ from app.config import settings
 from app.deps import get_current_user
 from app.rate_limit import limiter
 from app.services import auth_service
+from app.services import audit_service
 from app.services.password_reset_service import (
     request_password_reset,
     reset_password,
@@ -18,6 +19,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 ERROR_MAP = {
     "INVALID_CREDENTIALS": (401, "Identifiant ou mot de passe incorrect"),
     "ROLE_MISMATCH": (403, "Rôle incorrect pour ce compte"),
+    "ADMIN_PORTAL_REQUIRED": (
+        403,
+        "Ce compte doit se connecter via le portail administration nationale (connexion-admin.html).",
+    ),
     "ACCOUNT_LOCKED": (423, "Compte temporairement verrouillé. Réessayez dans 15 minutes."),
     "EMAIL_EXISTS": (409, "Cet e-mail est déjà inscrit"),
     "PHONE_EXISTS": (409, "Ce numéro de téléphone est déjà lié à un compte"),
@@ -81,8 +86,22 @@ def login_route(request: Request, body: dict, response: Response):
             str(identifier).strip(),
             password,
             body.get("role"),
-            {"universite": body.get("universite"), "codeUni": body.get("codeUni")},
+            {
+                "universite": body.get("universite"),
+                "codeUni": body.get("codeUni"),
+                "adminPortal": bool(body.get("adminPortal")),
+            },
         )
+        user = find_user_by_id(result["session"]["userId"])
+        if user:
+            request.state.user = user
+            audit_service.log_audit(
+                request,
+                "login",
+                "session",
+                universite=user.get("universite"),
+                meta={"role": user.get("role"), "portal": bool(body.get("adminPortal"))},
+            )
         _set_auth_cookies(response, result["accessToken"], result["refreshRaw"])
         payload = {"ok": True, "session": result["session"]}
         if settings.cross_origin_auth:
@@ -115,7 +134,7 @@ def register_route(request: Request, body: dict, response: Response):
             detail={"error": "INVALID_PHONE", "message": "Numéro de téléphone mobile requis"},
         )
     role = str(body.get("role") or "").strip().lower()
-    if role in ("section", "universite"):
+    if role in ("section", "universite", "ministere", "superadmin"):
         from fastapi import HTTPException
 
         raise HTTPException(

@@ -31,7 +31,20 @@ def clean_email(email: str | None) -> str | None:
 
 
 def clean_role(role: str | None) -> str | None:
-    allowed = {"etudiant", "professeur", "assistant", "universite", "section"}
+    allowed = {
+        "etudiant",
+        "professeur",
+        "assistant",
+        "universite",
+        "section",
+        "ministere",
+        "superadmin",
+    }
+    return role if role in allowed else None
+
+
+def clean_institutional_role(role: str | None) -> str | None:
+    allowed = {"superadmin", "ministere", "universite"}
     return role if role in allowed else None
 
 

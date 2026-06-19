@@ -8,6 +8,7 @@ from app.config import settings
 from app.database import get_db, row_to_user
 from app.utils.sanitize import (
     clean_email,
+    clean_institutional_role,
     clean_phone,
     clean_role,
     clean_text,
@@ -60,6 +61,14 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
         raise ValueError("PHONE_EXISTS")
 
     role = clean_role(profile.get("role"))
+
+    if role in ("ministere", "superadmin"):
+        if not validate_person_name_text(profile.get("prenom")) or not validate_person_name_text(
+            profile.get("nom")
+        ):
+            raise ValueError("INVALID_PROFILE")
+        return phone
+
     if role == "universite":
         if not validate_person_name_text(profile.get("nomUniversite"), 3):
             raise ValueError("INVALID_PROFILE")
@@ -93,7 +102,7 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
     for row in get_db().execute(
         "SELECT email, role, prenom, nom FROM users"
     ).fetchall():
-        if row["role"] == "universite":
+        if row["role"] in ("universite", "ministere", "superadmin"):
             continue
         if norm_person_key(row["prenom"], row["nom"]) == key and row["role"] != role:
             raise ValueError("MULTI_ROLE")
@@ -202,11 +211,17 @@ def user_to_session(user: dict | None) -> dict | None:
         else user.get("universite")
     )
     is_uni = user.get("role") == "universite"
+    is_institutional = user.get("role") in ("ministere", "superadmin")
+    display_nom = user.get("nom", "")
+    if is_uni:
+        display_nom = user.get("nomUniversite") or user.get("email", "")
+    elif is_institutional:
+        display_nom = user.get("nom", "") or user.get("email", "")
     return {
         "role": user["role"],
         "identifiant": user["email"],
         "userId": user["id"],
-        "nom": user.get("nomUniversite") or user.get("email", "") if is_uni else user.get("nom", ""),
+        "nom": display_nom,
         "prenom": user.get("prenom"),
         "displayName": get_display_name(user),
         "universite": uni,
@@ -572,3 +587,181 @@ def update_password(user_id: str, new_password: str) -> None:
 def revoke_all_refresh_tokens(user_id: str) -> None:
     get_db().execute("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,))
     get_db().commit()
+
+
+CAMPUS_ROLES = ("etudiant", "professeur", "assistant", "section")
+INSTITUTIONAL_ROLES = ("superadmin", "ministere", "universite")
+ROLE_LABELS = {
+    "superadmin": "Super Admin",
+    "ministere": "Ministère",
+    "universite": "Admin Université",
+}
+
+
+def _actor_campus(actor: dict) -> str | None:
+    return actor.get("universite") or actor.get("codeUni") or actor.get("sigle")
+
+
+def _campus_account_row(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "prenom": user.get("prenom"),
+        "nom": user.get("nom"),
+        "matricule": user.get("matricule"),
+        "filiere": user.get("filiere"),
+        "niveau": user.get("niveau"),
+        "classe": user.get("classe"),
+        "createdAt": user.get("createdAt"),
+    }
+
+
+def list_campus_accounts(actor: dict, role: str | None = None) -> list[dict]:
+    if actor.get("role") != "universite":
+        raise ValueError("FORBIDDEN")
+    campus = _actor_campus(actor)
+    if not campus:
+        raise ValueError("FORBIDDEN")
+    params: list[str] = [campus]
+    query = (
+        "SELECT * FROM users WHERE universite = ? "
+        "AND role IN ('etudiant','professeur','assistant','section')"
+    )
+    if role and role in CAMPUS_ROLES:
+        query += " AND role = ?"
+        params.append(role)
+    query += " ORDER BY role, nom, prenom"
+    rows = get_db().execute(query, tuple(params)).fetchall()
+    return [_campus_account_row(row_to_user(r)) for r in rows]
+
+
+def campus_accounts_summary(actor: dict) -> dict:
+    accounts = list_campus_accounts(actor)
+    by_role = {r: 0 for r in CAMPUS_ROLES}
+    for account in accounts:
+        if account["role"] in by_role:
+            by_role[account["role"]] += 1
+    return {"total": len(accounts), "byRole": by_role, "campus": _actor_campus(actor)}
+
+
+def delete_campus_account(actor: dict, email: str) -> dict:
+    if actor.get("role") != "universite":
+        raise ValueError("FORBIDDEN")
+    campus = _actor_campus(actor)
+    email_clean = validate_email_strict(email) or clean_email(email)
+    if not email_clean:
+        raise ValueError("INVALID_INPUT")
+    if email_clean.lower() == str(actor.get("email", "")).lower():
+        raise ValueError("CANNOT_DELETE_SELF")
+    target = find_user_by_email(email_clean)
+    if not target:
+        raise ValueError("NOT_FOUND")
+    if target.get("role") == "universite":
+        raise ValueError("FORBIDDEN_TARGET")
+    if target.get("role") not in CAMPUS_ROLES:
+        raise ValueError("FORBIDDEN_TARGET")
+    if campus and target.get("universite") != campus:
+        raise ValueError("UNIVERSITY_MISMATCH")
+    revoke_all_refresh_tokens(target["id"])
+    get_db().execute("DELETE FROM users WHERE id = ?", (target["id"],))
+    get_db().commit()
+    return {"ok": True, "email": email_clean}
+
+
+def _institutional_row(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "roleLabel": ROLE_LABELS.get(user["role"], user["role"]),
+        "displayName": get_display_name(user),
+        "prenom": user.get("prenom"),
+        "nom": user.get("nom"),
+        "responsable": user.get("responsable"),
+        "universite": user.get("universite") or user.get("codeUni"),
+        "sigle": user.get("sigle"),
+        "nomUniversite": user.get("nomUniversite"),
+        "ville": user.get("ville"),
+        "telephone": user.get("telephone"),
+        "createdAt": user.get("createdAt"),
+    }
+
+
+def list_institutional_admins(actor: dict) -> list[dict]:
+    actor_role = actor.get("role")
+    if actor_role not in ("superadmin", "ministere"):
+        raise ValueError("FORBIDDEN")
+    db = get_db()
+    if actor_role == "ministere":
+        rows = db.execute(
+            "SELECT * FROM users WHERE role IN ('ministere','universite') ORDER BY role, email"
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM users WHERE role IN ('superadmin','ministere','universite') "
+            "ORDER BY role, email"
+        ).fetchall()
+    return [_institutional_row(row_to_user(r)) for r in rows]
+
+
+def institutional_admins_summary(actor: dict) -> dict:
+    admins = list_institutional_admins(actor)
+    by_role = {r: 0 for r in INSTITUTIONAL_ROLES}
+    for admin in admins:
+        if admin["role"] in by_role:
+            by_role[admin["role"]] += 1
+    return {"total": len(admins), "byRole": by_role}
+
+
+def create_institutional_admin(actor: dict, profile: dict) -> dict:
+    if actor.get("role") != "superadmin":
+        raise ValueError("FORBIDDEN")
+    role = clean_institutional_role(str(profile.get("role") or "").strip().lower())
+    if not role:
+        raise ValueError("INVALID_PROFILE")
+    if not validate_password(profile.get("password")):
+        raise ValueError("INVALID_PASSWORD")
+    email = validate_email_strict(profile.get("email"))
+    if not email:
+        raise ValueError("INVALID_PROFILE")
+
+    payload: dict = {
+        "email": email,
+        "password": profile["password"],
+        "role": role,
+        "telephone": profile.get("telephone"),
+        "prenom": profile.get("prenom"),
+        "nom": profile.get("nom"),
+    }
+    if role == "universite":
+        payload.update(
+            {
+                "nomUniversite": profile.get("nomUniversite"),
+                "responsable": profile.get("responsable"),
+                "codeUni": profile.get("codeUni"),
+                "sigle": profile.get("sigle"),
+                "ville": profile.get("ville"),
+                "universite": profile.get("universite") or profile.get("sigle"),
+            }
+        )
+    return create_user(payload)
+
+
+def delete_institutional_admin(actor: dict, email: str) -> dict:
+    if actor.get("role") != "superadmin":
+        raise ValueError("FORBIDDEN")
+    email_clean = validate_email_strict(email) or clean_email(email)
+    if not email_clean:
+        raise ValueError("INVALID_INPUT")
+    if email_clean.lower() == str(actor.get("email", "")).lower():
+        raise ValueError("CANNOT_DELETE_SELF")
+    target = find_user_by_email(email_clean)
+    if not target:
+        raise ValueError("NOT_FOUND")
+    if target.get("role") not in INSTITUTIONAL_ROLES:
+        raise ValueError("FORBIDDEN_TARGET")
+    revoke_all_refresh_tokens(target["id"])
+    get_db().execute("DELETE FROM users WHERE id = ?", (target["id"],))
+    get_db().commit()
+    return {"ok": True, "email": email_clean, "role": target.get("role")}

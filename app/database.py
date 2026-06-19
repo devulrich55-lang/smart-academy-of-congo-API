@@ -231,6 +231,45 @@ def _migrate_users_section_role_sqlite(db: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_users_admin_roles_sqlite(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    ddl = row["sql"] if row else ""
+    if "'ministere'" in ddl and "'superadmin'" in ddl:
+        return
+
+    cols = conn.execute("PRAGMA table_info(users)").fetchall()
+    if not cols:
+        return
+
+    parts: list[str] = []
+    for col in cols:
+        _cid, name, ctype, notnull, default, pk = col
+        if name == "role":
+            parts.append(
+                "role TEXT NOT NULL CHECK (role IN "
+                "('etudiant','professeur','assistant','universite','section','ministere','superadmin'))"
+            )
+            continue
+        col_def = f"{name} {ctype or 'TEXT'}"
+        if pk:
+            col_def += " PRIMARY KEY"
+        elif notnull:
+            col_def += " NOT NULL"
+        if default is not None:
+            col_def += f" DEFAULT {default}"
+        parts.append(col_def)
+
+    col_names = ", ".join(c[1] for c in cols)
+    conn.execute(f"CREATE TABLE users_new ({', '.join(parts)})")
+    conn.execute(
+        f"INSERT INTO users_new ({col_names}) SELECT {col_names} FROM users"
+    )
+    conn.execute("DROP TABLE users")
+    conn.execute("ALTER TABLE users_new RENAME TO users")
+
+
 def _connect_sqlite() -> SACDatabase:
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
@@ -270,6 +309,7 @@ def _connect_sqlite() -> SACDatabase:
         except sqlite3.OperationalError:
             pass
     _migrate_users_section_role_sqlite(conn)
+    _migrate_users_admin_roles_sqlite(conn)
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

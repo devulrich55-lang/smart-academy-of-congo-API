@@ -68,6 +68,12 @@ def login(
     if expected_role and user["role"] != expected_role:
         raise ValueError("ROLE_MISMATCH")
 
+    if options.get("adminPortal"):
+        if user["role"] not in ("ministere", "superadmin"):
+            raise ValueError("ROLE_MISMATCH")
+    elif user["role"] in ("ministere", "superadmin"):
+        raise ValueError("ADMIN_PORTAL_REQUIRED")
+
     registered_uni = (
         user.get("universite") or user.get("sigle") or user.get("codeUni")
         if user["role"] == "universite"

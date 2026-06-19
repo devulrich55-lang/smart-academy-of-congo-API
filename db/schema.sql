@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('etudiant','professeur','assistant','universite','section')),
+  role TEXT NOT NULL CHECK (role IN ('etudiant','professeur','assistant','universite','section','ministere','superadmin')),
   prenom TEXT,
   nom TEXT,
   telephone TEXT,

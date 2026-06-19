@@ -237,3 +237,21 @@ CREATE TABLE IF NOT EXISTS online_presence (
 CREATE INDEX IF NOT EXISTS idx_presence_uni_updated ON online_presence(universite, updated_at);
 CREATE INDEX IF NOT EXISTS idx_presence_section ON online_presence(section_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_presence_classe ON online_presence(classe, updated_at);
+
+-- Journal d'audit (activités admin & connexions)
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  actor_email TEXT,
+  actor_role TEXT NOT NULL DEFAULT 'public',
+  action TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  resource_id TEXT,
+  universite TEXT,
+  ip_hash TEXT,
+  meta TEXT DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_role ON audit_log(actor_role, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_uni ON audit_log(universite, created_at DESC);
