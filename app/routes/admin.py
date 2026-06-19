@@ -13,6 +13,7 @@ from app.services.user_service import (
     list_institutional_admins,
     list_platform_accounts,
     platform_accounts_summary,
+    delete_platform_account,
 )
 from app.services.audit_service import activities_summary, list_activities
 
@@ -162,6 +163,29 @@ def platform_accounts_list_route(
     try:
         accounts = list_platform_accounts(user, role=role, q=q, universite=universite, limit=limit)
         return {"accounts": accounts, "total": len(accounts)}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.delete("/platform/accounts/{email}")
+@limiter.limit("30/hour")
+def delete_platform_account_route(
+    email: str,
+    request: Request,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    try:
+        result = delete_platform_account(user, email)
+        audit_service.log_audit(
+            request,
+            "delete_platform_account",
+            "user",
+            meta={
+                "email": result.get("email", "")[:80],
+                "role": result.get("role"),
+            },
+        )
+        return result
     except ValueError as e:
         _map_error(e)
 

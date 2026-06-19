@@ -865,3 +865,40 @@ def platform_accounts_summary(actor: dict) -> dict:
         if rr in by_role:
             by_role[rr] += 1
     return {"total": len(accounts), "byRole": by_role}
+
+
+def _purge_user_records(target_email: str, user_id: str) -> None:
+    db = get_db()
+    for stmt, params in (
+        ("DELETE FROM online_presence WHERE user_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM grades WHERE student_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM grades WHERE professor_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM reclamations WHERE student_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,)),
+        ("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,)),
+        ("DELETE FROM users WHERE id = ?", (user_id,)),
+    ):
+        try:
+            db.execute(stmt, params)
+        except Exception:
+            pass
+    db.commit()
+
+
+def delete_platform_account(actor: dict, email: str) -> dict:
+    if actor.get("role") != "superadmin":
+        raise ValueError("FORBIDDEN")
+    target_email = validate_email_strict(email) or clean_email(email)
+    if not target_email:
+        raise ValueError("INVALID_INPUT")
+    if target_email.lower() == str(actor.get("email", "")).lower():
+        raise ValueError("CANNOT_DELETE_SELF")
+
+    target = find_user_by_email(target_email)
+    if not target:
+        raise ValueError("NOT_FOUND")
+    if target.get("role") not in PLATFORM_ROLES:
+        raise ValueError("FORBIDDEN_TARGET")
+
+    _purge_user_records(target_email, target["id"])
+    return {"ok": True, "email": target_email, "role": target.get("role")}
