@@ -355,6 +355,96 @@ def list_students_for_professor(actor: dict) -> list[dict]:
     return [row_to_user(r) for r in rows if r]
 
 
+def _account_public_row(user: dict) -> dict:
+    payment = user.get("payment") if isinstance(user.get("payment"), dict) else None
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "prenom": user.get("prenom"),
+        "nom": user.get("nom"),
+        "telephone": user.get("telephone"),
+        "universite": user.get("universite"),
+        "filiere": user.get("filiere"),
+        "niveau": user.get("niveau"),
+        "classe": user.get("classe"),
+        "matricule": user.get("matricule"),
+        "sectionId": user.get("sectionId"),
+        "paymentStatus": payment.get("status") if payment else None,
+        "createdAt": user.get("createdAt"),
+    }
+
+
+def list_campus_accounts(actor: dict, role: str | None = None) -> list[dict]:
+    if actor.get("role") != "universite":
+        raise ValueError("FORBIDDEN")
+    campus = _actor_campus(actor)
+    if not campus:
+        return []
+
+    q = "SELECT * FROM users WHERE universite = ? AND role != 'universite'"
+    params: list = [campus]
+    allowed_roles = ("etudiant", "professeur", "assistant", "section")
+    if role and role in allowed_roles:
+        q += " AND role = ?"
+        params.append(role)
+    q += " ORDER BY role, nom, prenom, email"
+
+    rows = get_db().execute(q, params).fetchall()
+    return [_account_public_row(row_to_user(r)) for r in rows if r]
+
+
+def campus_accounts_summary(actor: dict) -> dict:
+    accounts = list_campus_accounts(actor)
+    by_role = {"etudiant": 0, "professeur": 0, "assistant": 0, "section": 0}
+    for account in accounts:
+        rr = account.get("role")
+        if rr in by_role:
+            by_role[rr] += 1
+    return {"total": len(accounts), "byRole": by_role}
+
+
+def delete_campus_account(actor: dict, email: str) -> dict:
+    if actor.get("role") != "universite":
+        raise ValueError("FORBIDDEN")
+    campus = _actor_campus(actor)
+    target_email = validate_email_strict(email) or clean_email(email)
+    if not target_email:
+        raise ValueError("INVALID_INPUT")
+
+    actor_email = (actor.get("email") or "").strip().lower()
+    if target_email == actor_email:
+        raise ValueError("CANNOT_DELETE_SELF")
+
+    target = find_user_by_email(target_email)
+    if not target:
+        raise ValueError("NOT_FOUND")
+    if target.get("role") == "universite":
+        raise ValueError("FORBIDDEN_TARGET")
+    if campus and target.get("universite") != campus:
+        raise ValueError("UNIVERSITY_MISMATCH")
+
+    user_id = target["id"]
+    db = get_db()
+
+    for stmt, params in (
+        ("DELETE FROM online_presence WHERE user_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM grades WHERE student_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM grades WHERE professor_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM reclamations WHERE student_email = ? COLLATE NOCASE", (target_email,)),
+        ("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,)),
+        ("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,)),
+        ("DELETE FROM users WHERE id = ?", (user_id,)),
+    ):
+        try:
+            db.execute(stmt, params)
+        except Exception:
+            pass
+
+    db.commit()
+    return {"ok": True, "email": target_email}
+
+
 def list_campus_professors(actor: dict) -> list[dict]:
     campus = _actor_campus(actor)
     if actor.get("role") != "universite" or not campus:
