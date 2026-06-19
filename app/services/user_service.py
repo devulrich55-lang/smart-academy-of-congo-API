@@ -765,3 +765,103 @@ def delete_institutional_admin(actor: dict, email: str) -> dict:
     get_db().execute("DELETE FROM users WHERE id = ?", (target["id"],))
     get_db().commit()
     return {"ok": True, "email": email_clean, "role": target.get("role")}
+
+
+PLATFORM_ROLES = (
+    "superadmin",
+    "ministere",
+    "universite",
+    "etudiant",
+    "professeur",
+    "assistant",
+    "section",
+)
+
+
+def _platform_registry_row(user: dict) -> dict:
+    payment = user.get("payment") if isinstance(user.get("payment"), dict) else None
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user["role"],
+        "prenom": user.get("prenom"),
+        "nom": user.get("nom"),
+        "displayName": get_display_name(user),
+        "telephone": user.get("telephone"),
+        "universite": user.get("universite") or user.get("sigle") or user.get("codeUni"),
+        "nomUniversite": user.get("nomUniversite"),
+        "sigle": user.get("sigle"),
+        "filiere": user.get("filiere"),
+        "niveau": user.get("niveau"),
+        "classe": user.get("classe"),
+        "matricule": user.get("matricule"),
+        "sectionId": user.get("sectionId"),
+        "paymentStatus": payment.get("status") if payment else None,
+        "createdAt": user.get("createdAt"),
+        "source": "api",
+    }
+
+
+def list_platform_accounts(
+    actor: dict,
+    role: str | None = None,
+    q: str | None = None,
+    universite: str | None = None,
+    limit: int = 500,
+) -> list[dict]:
+    if actor.get("role") != "superadmin":
+        raise ValueError("FORBIDDEN")
+
+    query = (
+        "SELECT * FROM users WHERE role IN "
+        "('superadmin','ministere','universite','etudiant','professeur','assistant','section')"
+    )
+    params: list = []
+    if role and role in PLATFORM_ROLES:
+        query += " AND role = ?"
+        params.append(role)
+    if universite:
+        u = clean_text(universite, 100)
+        query += (
+            " AND (LOWER(universite) = LOWER(?) OR LOWER(sigle) = LOWER(?) "
+            "OR LOWER(nom_universite) LIKE ?)"
+        )
+        params.extend([u, u, f"%{u.lower()}%"])
+    query += " ORDER BY datetime(created_at) DESC"
+
+    rows = get_db().execute(query, tuple(params)).fetchall()
+    accounts = [_platform_registry_row(row_to_user(r)) for r in rows if r]
+
+    if q:
+        needle = q.strip().lower()
+        accounts = [
+            a
+            for a in accounts
+            if needle
+            in " ".join(
+                str(a.get(k) or "")
+                for k in (
+                    "displayName",
+                    "email",
+                    "telephone",
+                    "universite",
+                    "nomUniversite",
+                    "filiere",
+                    "classe",
+                    "role",
+                )
+            ).lower()
+        ]
+
+    cap = max(1, min(int(limit or 500), 5000))
+    return accounts[:cap]
+
+
+def platform_accounts_summary(actor: dict) -> dict:
+    accounts = list_platform_accounts(actor, limit=5000)
+    by_role = {r: 0 for r in PLATFORM_ROLES}
+    for account in accounts:
+        rr = account.get("role")
+        if rr in by_role:
+            by_role[rr] += 1
+    return {"total": len(accounts), "byRole": by_role}

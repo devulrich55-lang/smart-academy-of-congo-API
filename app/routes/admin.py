@@ -11,6 +11,8 @@ from app.services.user_service import (
     institutional_admins_summary,
     list_campus_accounts,
     list_institutional_admins,
+    list_platform_accounts,
+    platform_accounts_summary,
 )
 from app.services.audit_service import activities_summary, list_activities
 
@@ -135,6 +137,31 @@ def delete_institutional_route(
             meta={"email": result.get("email", "")[:80], "role": result.get("role")},
         )
         return result
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/platform/accounts/summary")
+def platform_accounts_summary_route(
+    user: dict = Depends(require_roles("superadmin")),
+):
+    try:
+        return platform_accounts_summary(user)
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/platform/accounts")
+def platform_accounts_list_route(
+    user: dict = Depends(require_roles("superadmin")),
+    role: str | None = Query(None),
+    q: str | None = Query(None),
+    universite: str | None = Query(None),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    try:
+        accounts = list_platform_accounts(user, role=role, q=q, universite=universite, limit=limit)
+        return {"accounts": accounts, "total": len(accounts)}
     except ValueError as e:
         _map_error(e)
 
