@@ -5,6 +5,7 @@ from pathlib import Path
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.services import ai_correction_service, audit_service, meeting_service, platform_service
+from app.services.user_service import list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
 from app.utils.pagination import clamp_page
 
@@ -609,6 +610,30 @@ def orientation(body: dict, request: Request, user: dict = Depends(require_roles
         request, "orientation_ia", "orientation", meta={"domain": advice.get("domain")}
     )
     return {"advice": advice}
+
+
+@router.get("/students/teaching")
+def professor_students(user: dict = Depends(require_roles("professeur"))):
+    try:
+        students = list_students_for_professor(user)
+        return {
+            "students": [
+                {
+                    "email": s["email"],
+                    "prenom": s.get("prenom"),
+                    "nom": s.get("nom"),
+                    "matricule": s.get("matricule"),
+                    "niveau": s.get("niveau"),
+                    "classe": s.get("classe"),
+                    "filiere": s.get("filiere"),
+                    "universite": s.get("universite"),
+                    "sectionId": s.get("sectionId"),
+                }
+                for s in students
+            ]
+        }
+    except ValueError as e:
+        _handle_platform_error(e)
 
 
 @router.post("/presence/ping")

@@ -340,6 +340,21 @@ def list_students_for_section(actor: dict) -> list[dict]:
     return [row_to_user(r) for r in rows if r]
 
 
+def list_students_for_professor(actor: dict) -> list[dict]:
+    if actor.get("role") != "professeur":
+        raise ValueError("FORBIDDEN")
+    campus = _actor_campus(actor)
+    if not campus:
+        return []
+    rows = get_db().execute(
+        """SELECT * FROM users
+           WHERE role = 'etudiant' AND universite = ?
+           ORDER BY nom, prenom""",
+        (campus,),
+    ).fetchall()
+    return [row_to_user(r) for r in rows if r]
+
+
 def list_campus_professors(actor: dict) -> list[dict]:
     campus = _actor_campus(actor)
     if actor.get("role") != "universite" or not campus:
