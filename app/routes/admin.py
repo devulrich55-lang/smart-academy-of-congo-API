@@ -224,6 +224,7 @@ def activities_list_route(
 @limiter.limit("30/hour")
 def delete_activities_route(
     body: dict,
+    request: Request,
     user: dict = Depends(require_roles("superadmin", "ministere", "universite")),
 ):
     try:
