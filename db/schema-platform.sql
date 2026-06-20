@@ -255,3 +255,28 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_role ON audit_log(actor_role, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_uni ON audit_log(universite, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS home_news (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL CHECK (scope IN ('national','university')),
+  author_role TEXT NOT NULL CHECK (author_role IN ('ministere','universite')),
+  universite TEXT NOT NULL,
+  university_name TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  title TEXT NOT NULL,
+  excerpt TEXT NOT NULL,
+  body TEXT DEFAULT '',
+  link_url TEXT DEFAULT '',
+  link_label TEXT DEFAULT 'En savoir plus',
+  published INTEGER DEFAULT 1,
+  pinned INTEGER DEFAULT 0,
+  valid_until TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_home_news_scope ON home_news(scope, published, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_home_news_uni ON home_news(universite, published, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_home_news_author ON home_news(author_role, author_id);

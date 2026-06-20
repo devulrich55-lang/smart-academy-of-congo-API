@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.deps import get_current_user, require_roles
-from app.services import ai_correction_service, audit_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, home_news_service, meeting_service, platform_service
 from app.services.user_service import list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
 from app.utils.pagination import clamp_page
@@ -657,6 +657,49 @@ def section_presence(user: dict = Depends(require_roles("section", "assistant", 
 def professor_presence(user: dict = Depends(require_roles("professeur"))):
     try:
         return platform_service.professor_presence_by_class(user)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/home-news")
+def list_home_news_public():
+    return {"items": home_news_service.list_public_home_news()}
+
+
+@router.get("/home-news/manage")
+def list_home_news_manage(user: dict = Depends(require_roles("ministere", "universite"))):
+    try:
+        return {"items": home_news_service.list_manage_home_news(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/home-news", status_code=201)
+def create_home_news_route(body: dict, user: dict = Depends(require_roles("ministere", "universite"))):
+    try:
+        item = home_news_service.create_home_news(user, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/home-news/{item_id}")
+def update_home_news_route(
+    item_id: str, body: dict, user: dict = Depends(require_roles("ministere", "universite"))
+):
+    try:
+        item = home_news_service.update_home_news(user, item_id, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.delete("/home-news/{item_id}")
+def delete_home_news_route(
+    item_id: str, user: dict = Depends(require_roles("ministere", "universite"))
+):
+    try:
+        return home_news_service.delete_home_news(user, item_id)
     except ValueError as e:
         _handle_platform_error(e)
 

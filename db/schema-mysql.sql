@@ -488,3 +488,30 @@ CREATE INDEX idx_reclamations_section ON reclamations(section_id);
 CREATE INDEX idx_reclamations_student ON reclamations(student_email);
 CREATE INDEX idx_reclamations_uni ON reclamations(universite);
 CREATE INDEX idx_reclamations_statut ON reclamations(statut);
+
+CREATE TABLE IF NOT EXISTS home_news (
+  id VARCHAR(36) PRIMARY KEY,
+  scope VARCHAR(20) NOT NULL,
+  author_role VARCHAR(20) NOT NULL,
+  universite VARCHAR(80) NOT NULL,
+  university_name VARCHAR(300) NOT NULL,
+  author_id VARCHAR(255) NOT NULL,
+  author_name VARCHAR(200) NOT NULL,
+  category VARCHAR(40) NOT NULL,
+  title VARCHAR(200) NOT NULL,
+  excerpt VARCHAR(400) NOT NULL,
+  body TEXT NULL,
+  link_url VARCHAR(500) NULL,
+  link_label VARCHAR(120) NULL,
+  published TINYINT(1) DEFAULT 1,
+  pinned TINYINT(1) DEFAULT 0,
+  valid_until VARCHAR(20) NULL,
+  created_at VARCHAR(40) NOT NULL,
+  updated_at VARCHAR(40) NOT NULL,
+  CONSTRAINT chk_home_news_scope CHECK (scope IN ('national','university')),
+  CONSTRAINT chk_home_news_author CHECK (author_role IN ('ministere','universite'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE INDEX idx_home_news_scope ON home_news(scope, published, created_at);
+CREATE INDEX idx_home_news_uni ON home_news(universite, published, created_at);
+CREATE INDEX idx_home_news_author ON home_news(author_role, author_id);

@@ -161,6 +161,91 @@ def _migrate_reset_code_column(conn, backend: str) -> None:
         pass
 
 
+def _migrate_home_news_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS home_news (
+                  id VARCHAR(36) PRIMARY KEY,
+                  scope VARCHAR(20) NOT NULL,
+                  author_role VARCHAR(20) NOT NULL,
+                  universite VARCHAR(80) NOT NULL,
+                  university_name VARCHAR(300) NOT NULL,
+                  author_id VARCHAR(255) NOT NULL,
+                  author_name VARCHAR(200) NOT NULL,
+                  category VARCHAR(40) NOT NULL,
+                  title VARCHAR(200) NOT NULL,
+                  excerpt VARCHAR(400) NOT NULL,
+                  body TEXT NULL,
+                  link_url VARCHAR(500) NULL,
+                  link_label VARCHAR(120) NULL,
+                  published TINYINT(1) DEFAULT 1,
+                  pinned TINYINT(1) DEFAULT 0,
+                  valid_until VARCHAR(20) NULL,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_home_news_scope ON home_news(scope, published, created_at)",
+            "CREATE INDEX idx_home_news_uni ON home_news(universite, published, created_at)",
+            "CREATE INDEX idx_home_news_author ON home_news(author_role, author_id)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS home_news (
+              id TEXT PRIMARY KEY,
+              scope TEXT NOT NULL CHECK (scope IN ('national','university')),
+              author_role TEXT NOT NULL CHECK (author_role IN ('ministere','universite')),
+              universite TEXT NOT NULL,
+              university_name TEXT NOT NULL,
+              author_id TEXT NOT NULL,
+              author_name TEXT NOT NULL,
+              category TEXT NOT NULL,
+              title TEXT NOT NULL,
+              excerpt TEXT NOT NULL,
+              body TEXT DEFAULT '',
+              link_url TEXT DEFAULT '',
+              link_label TEXT DEFAULT 'En savoir plus',
+              published INTEGER DEFAULT 1,
+              pinned INTEGER DEFAULT 0,
+              valid_until TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    for idx_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_home_news_scope ON home_news(scope, published, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_home_news_uni ON home_news(universite, published, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_home_news_author ON home_news(author_role, author_id)",
+    ):
+        try:
+            conn.execute(idx_sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+
 def _migrate_users_logo_url_column(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -213,6 +298,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_reset_code_column(conn, "mysql")
     _migrate_users_classe_column(conn, "mysql")
     _migrate_users_logo_url_column(conn, "mysql")
+    _migrate_home_news_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -331,6 +417,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_users_section_role_sqlite(conn)
     _migrate_users_admin_roles_sqlite(conn)
     _migrate_users_logo_url_column(conn, "sqlite")
+    _migrate_home_news_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
