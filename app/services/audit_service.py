@@ -111,3 +111,80 @@ def activities_summary(actor: dict) -> dict:
         "byRole": by_role,
         "lastAt": items[0]["createdAt"] if items else None,
     }
+
+
+def _activity_row_visible_to_actor(row, actor: dict) -> bool:
+    role = actor.get("role")
+    if role == "superadmin":
+        return True
+    if role == "ministere":
+        return (row["actor_role"] or "") in ("superadmin", "ministere", "universite")
+    if role == "universite":
+        campus = actor.get("universite") or actor.get("codeUni") or actor.get("sigle")
+        email = (actor.get("email") or "").lower()
+        actor_email = (row["actor_email"] or "").lower()
+        row_uni = row["universite"]
+        return actor_email == email or bool(campus and row_uni and row_uni == campus)
+    return False
+
+
+def delete_activities(
+    actor: dict, ids: list[str] | None = None, delete_all: bool = False
+) -> dict:
+    role = actor.get("role")
+    if role not in ("superadmin", "ministere", "universite"):
+        raise ValueError("FORBIDDEN")
+
+    db = get_db()
+
+    if delete_all:
+        if role == "superadmin":
+            count_row = db.execute("SELECT COUNT(*) AS c FROM audit_log").fetchone()
+            deleted = int(count_row["c"] or 0) if count_row else 0
+            db.execute("DELETE FROM audit_log")
+        elif role == "ministere":
+            count_row = db.execute(
+                """SELECT COUNT(*) AS c FROM audit_log
+                   WHERE actor_role IN ('superadmin', 'ministere', 'universite')"""
+            ).fetchone()
+            deleted = int(count_row["c"] or 0) if count_row else 0
+            db.execute(
+                """DELETE FROM audit_log
+                   WHERE actor_role IN ('superadmin', 'ministere', 'universite')"""
+            )
+        else:
+            campus = actor.get("universite") or actor.get("codeUni") or actor.get("sigle")
+            email = actor.get("email")
+            if not campus and not email:
+                raise ValueError("FORBIDDEN")
+            count_row = db.execute(
+                """SELECT COUNT(*) AS c FROM audit_log
+                   WHERE actor_email = ? COLLATE NOCASE
+                      OR (universite IS NOT NULL AND universite = ?)""",
+                (email, campus),
+            ).fetchone()
+            deleted = int(count_row["c"] or 0) if count_row else 0
+            db.execute(
+                """DELETE FROM audit_log
+                   WHERE actor_email = ? COLLATE NOCASE
+                      OR (universite IS NOT NULL AND universite = ?)""",
+                (email, campus),
+            )
+        db.commit()
+        return {"ok": True, "deleted": deleted}
+
+    id_list = [str(item).strip() for item in (ids or []) if str(item).strip()]
+    if not id_list:
+        raise ValueError("INVALID_INPUT")
+
+    deleted = 0
+    for activity_id in id_list:
+        row = db.execute(
+            "SELECT * FROM audit_log WHERE id = ?", (activity_id,)
+        ).fetchone()
+        if not row or not _activity_row_visible_to_actor(row, actor):
+            continue
+        db.execute("DELETE FROM audit_log WHERE id = ?", (activity_id,))
+        deleted += 1
+    db.commit()
+    return {"ok": True, "deleted": deleted}

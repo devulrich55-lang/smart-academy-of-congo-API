@@ -16,7 +16,7 @@ from app.services.user_service import (
     platform_accounts_summary,
     delete_platform_account,
 )
-from app.services.audit_service import activities_summary, list_activities
+from app.services.audit_service import activities_summary, delete_activities, list_activities
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -216,5 +216,19 @@ def activities_list_route(
 ):
     try:
         return {"activities": list_activities(user, limit)}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.delete("/activities")
+@limiter.limit("30/hour")
+def delete_activities_route(
+    body: dict,
+    user: dict = Depends(require_roles("superadmin", "ministere", "universite")),
+):
+    try:
+        delete_all = bool(body.get("deleteAll"))
+        ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+        return delete_activities(user, ids=ids, delete_all=delete_all)
     except ValueError as e:
         _map_error(e)
