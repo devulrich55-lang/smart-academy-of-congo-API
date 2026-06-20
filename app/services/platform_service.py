@@ -1145,3 +1145,63 @@ def professor_presence_by_class(user: dict) -> dict:
         classes.append({"classe": name, "onlineCount": c})
 
     return {"onlineCount": total, "classes": classes, "updatedAt": _now()}
+
+
+PRESENCE_ROLE_LABELS = {
+    "etudiant": "Étudiant",
+    "professeur": "Professeur",
+    "assistant": "Assistant",
+    "section": "Chef de section",
+    "universite": "Admin université",
+}
+
+
+def platform_presence_global_summary(actor: dict) -> dict:
+    if actor.get("role") != "superadmin":
+        raise ValueError("FORBIDDEN")
+
+    cutoff = _active_presence_cutoff(90)
+    rows = get_db().execute(
+        """SELECT user_email, role, universite, filiere, section_id, classe, updated_at
+           FROM online_presence WHERE updated_at >= ?
+           ORDER BY updated_at DESC""",
+        (cutoff,),
+    ).fetchall()
+
+    by_role: dict[str, int] = {}
+    by_uni: dict[str, int] = {}
+    users: list[dict] = []
+
+    for row in rows:
+        role = str(row["role"] or "").strip() or "inconnu"
+        by_role[role] = by_role.get(role, 0) + 1
+
+        uni = str(row["universite"] or "").strip() or "—"
+        by_uni[uni] = by_uni.get(uni, 0) + 1
+
+        users.append(
+            {
+                "email": row["user_email"],
+                "role": role,
+                "roleLabel": PRESENCE_ROLE_LABELS.get(role, role),
+                "universite": row["universite"],
+                "filiere": row["filiere"],
+                "sectionId": row["section_id"],
+                "classe": row["classe"],
+                "lastSeenAt": row["updated_at"],
+            }
+        )
+
+    by_universite = [
+        {"universite": name, "count": count}
+        for name, count in sorted(by_uni.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+    return {
+        "onlineCount": len(rows),
+        "byRole": by_role,
+        "byUniversite": by_universite[:30],
+        "users": users,
+        "windowSeconds": 90,
+        "updatedAt": _now(),
+    }

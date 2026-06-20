@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.deps import require_roles
 from app.rate_limit import limiter
 from app.services import audit_service
+from app.services.platform_service import platform_presence_global_summary
 from app.services.user_service import (
     campus_accounts_summary,
     create_institutional_admin,
@@ -196,6 +197,14 @@ def activities_summary_route(
 ):
     try:
         return activities_summary(user)
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/presence/summary")
+def presence_summary_route(user: dict = Depends(require_roles("superadmin"))):
+    try:
+        return platform_presence_global_summary(user)
     except ValueError as e:
         _map_error(e)
 
