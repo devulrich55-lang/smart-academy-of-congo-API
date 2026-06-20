@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
   locked_until VARCHAR(40) NULL,
   section_id VARCHAR(80) NULL,
   nomination VARCHAR(200) NULL,
+  logo_url MEDIUMTEXT NULL,
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   UNIQUE KEY uq_users_email (email),

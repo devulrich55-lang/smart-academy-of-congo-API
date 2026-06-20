@@ -21,6 +21,16 @@ from app.utils.sanitize import (
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 BCRYPT_ROUNDS = 12
+LOGO_URL_MAX_LEN = 4_000_000
+
+
+def _clean_logo_url(val: object) -> str | None:
+    if not val or not isinstance(val, str):
+        return None
+    s = val.strip()
+    if not s.startswith("data:image/") or len(s) > LOGO_URL_MAX_LEN:
+        return None
+    return s
 
 
 def get_display_name_from_user(user: dict | None) -> str:
@@ -158,8 +168,8 @@ def create_user(profile: dict) -> dict:
           filiere, niveau, matricule, date_naissance, departement, grade, service,
           fonction, num_employe, num_assist, nom_universite, sigle, ville, adresse,
           nb_etudiants, site_web, responsable, code_uni, cours_classes, payment,
-          inscription_fee, classe, section_id, created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          inscription_fee, classe, section_id, logo_url, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             user_id,
             email,
@@ -194,6 +204,7 @@ def create_user(profile: dict) -> dict:
             else None,
             clean_text(profile.get("classe"), 150) or None,
             clean_text(profile.get("sectionId"), 80) or None,
+            _clean_logo_url(profile.get("logoUrl")),
             now,
             now,
         ),
@@ -240,6 +251,8 @@ def user_to_session(user: dict | None) -> dict | None:
         "nomination": user.get("nomination"),
         "grade": user.get("grade"),
         "fonction": user.get("fonction"),
+        "nomUniversite": user.get("nomUniversite"),
+        "logoUrl": user.get("logoUrl"),
         "campusTariffs": user.get("campusTariffs"),
     }
 
@@ -684,6 +697,7 @@ def _institutional_row(user: dict) -> dict:
         "nomUniversite": user.get("nomUniversite"),
         "ville": user.get("ville"),
         "telephone": user.get("telephone"),
+        "logoUrl": user.get("logoUrl"),
         "createdAt": user.get("createdAt"),
     }
 
@@ -743,6 +757,7 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
                 "sigle": profile.get("sigle"),
                 "ville": profile.get("ville"),
                 "universite": profile.get("universite") or profile.get("sigle"),
+                "logoUrl": profile.get("logoUrl"),
             }
         )
     return create_user(payload)

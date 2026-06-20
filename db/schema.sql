@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
   locked_until TEXT,
           section_id TEXT,
           nomination TEXT,
+          logo_url TEXT,
           created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
