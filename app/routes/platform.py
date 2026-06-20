@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.services import ai_correction_service, audit_service, home_news_service, meeting_service, platform_service
-from app.services.user_service import list_students_for_professor
+from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
 from app.utils.pagination import clamp_page
 
@@ -748,6 +748,14 @@ def professor_presence(user: dict = Depends(require_roles("professeur"))):
         return platform_service.professor_presence_by_class(user)
     except ValueError as e:
         _handle_platform_error(e)
+
+
+@router.get("/campus-branding")
+def campus_branding_route(universite: str = Query(..., min_length=1, max_length=100)):
+    branding = get_campus_branding(universite)
+    if not branding:
+        return {"universite": universite, "logoUrl": None, "nomUniversite": None}
+    return branding
 
 
 @router.get("/home-news")

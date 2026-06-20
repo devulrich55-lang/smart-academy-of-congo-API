@@ -719,6 +719,40 @@ def list_institutional_admins(actor: dict) -> list[dict]:
     return [_institutional_row(row_to_user(r)) for r in rows]
 
 
+def get_campus_branding(campus_code: str) -> dict | None:
+    code = clean_text(campus_code, 100)
+    if not code:
+        return None
+    db = get_db()
+    rows = db.execute(
+        """SELECT * FROM users WHERE role = 'universite' AND (
+          universite = ? COLLATE NOCASE OR sigle = ? COLLATE NOCASE OR code_uni = ? COLLATE NOCASE
+        ) LIMIT 1""",
+        (code, code, code),
+    ).fetchall()
+    if not rows:
+        like = f"%{code.lower()}%"
+        rows = db.execute(
+            """SELECT * FROM users WHERE role = 'universite' AND (
+              LOWER(universite) = LOWER(?) OR LOWER(sigle) = LOWER(?)
+              OR LOWER(code_uni) = LOWER(?) OR LOWER(nom_universite) LIKE ?
+            ) LIMIT 1""",
+            (code, code, code, like),
+        ).fetchall()
+    if not rows:
+        return None
+    user = row_to_user(rows[0])
+    if not user:
+        return None
+    return {
+        "universite": user.get("universite") or user.get("sigle") or user.get("codeUni"),
+        "sigle": user.get("sigle"),
+        "codeUni": user.get("codeUni"),
+        "nomUniversite": user.get("nomUniversite"),
+        "logoUrl": user.get("logoUrl"),
+    }
+
+
 def institutional_admins_summary(actor: dict) -> dict:
     admins = list_institutional_admins(actor)
     by_role = {r: 0 for r in INSTITUTIONAL_ROLES}
@@ -760,7 +794,8 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
                 "logoUrl": profile.get("logoUrl"),
             }
         )
-    return create_user(payload)
+    created = create_user(payload)
+    return _institutional_row(created) if created else {}
 
 
 def delete_institutional_admin(actor: dict, email: str) -> dict:
