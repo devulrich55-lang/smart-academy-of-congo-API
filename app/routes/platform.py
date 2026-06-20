@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
 from pathlib import Path
+import uuid
 
 from app.config import settings
 from app.deps import get_current_user, require_roles
@@ -10,6 +11,94 @@ from app.utils.guards import assert_submission_access, pick_fields, strip_identi
 from app.utils.pagination import clamp_page
 
 router = APIRouter(prefix="/platform", tags=["platform"])
+
+HOME_NEWS_MAX_SIZE = 5 * 1024 * 1024
+HOME_NEWS_ALLOWED_EXT = {
+    ".pdf",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".mp3",
+    ".wav",
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".doc",
+    ".docx",
+}
+HOME_NEWS_BLOCKED_EXT = {
+    ".exe",
+    ".bat",
+    ".cmd",
+    ".sh",
+    ".php",
+    ".js",
+    ".html",
+    ".svg",
+    ".zip",
+    ".rar",
+}
+
+
+def _home_news_media_kind(ext: str) -> str:
+    if ext in {".jpg", ".jpeg", ".png", ".webp"}:
+        return "image"
+    if ext in {".mp4", ".webm", ".mov"}:
+        return "video"
+    if ext in {".mp3", ".wav"}:
+        return "audio"
+    return "document"
+
+
+async def _save_home_news_uploads(files: list[UploadFile]) -> list[dict]:
+    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    attachments = []
+    for f in files[:3]:
+        ext = Path(f.filename or "").suffix.lower()
+        if ext in HOME_NEWS_BLOCKED_EXT:
+            raise HTTPException(status_code=400, detail={"error": "INVALID_FILE"})
+        safe_ext = ext.lstrip(".") if ext in HOME_NEWS_ALLOWED_EXT else "bin"
+        name = f"{uuid.uuid4()}.{safe_ext}"
+        dest = settings.upload_dir / name
+        content = await f.read()
+        if len(content) > HOME_NEWS_MAX_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail={"error": "FILE_TOO_LARGE", "message": "Fichier max 5 Mo"},
+            )
+        dest.write_bytes(content)
+        attachments.append(
+            {
+                "name": f.filename or name,
+                "mediaPath": name,
+                "mediaUrl": f"/uploads/{name}",
+                "size": f"{len(content) // 1024} Ko",
+                "type": _home_news_media_kind(ext).upper(),
+                "mediaType": _home_news_media_kind(ext),
+            }
+        )
+    return attachments
+
+
+@router.post("/home-news/upload")
+async def upload_home_news_media_route(
+    files: list[UploadFile] = File(...),
+    user: dict = Depends(require_roles("ministere", "universite")),
+):
+    del user
+    saved = await _save_home_news_uploads(files)
+    if not saved:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_INPUT"})
+    primary = saved[0]
+    return {
+        "ok": True,
+        "mediaUrl": primary["mediaUrl"],
+        "mediaType": primary["mediaType"],
+        "mediaName": primary["name"],
+        "size": primary["size"],
+        "attachments": saved[1:],
+    }
 
 
 @router.post("/diplomas/verify")

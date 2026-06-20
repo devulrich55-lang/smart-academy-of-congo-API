@@ -184,6 +184,10 @@ def _migrate_home_news_table(conn, backend: str) -> None:
                   published TINYINT(1) DEFAULT 1,
                   pinned TINYINT(1) DEFAULT 0,
                   valid_until VARCHAR(20) NULL,
+                  media_url VARCHAR(500) NULL,
+                  media_type VARCHAR(20) NULL,
+                  media_name VARCHAR(255) NULL,
+                  attachments TEXT NULL,
                   created_at VARCHAR(40) NOT NULL,
                   updated_at VARCHAR(40) NOT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -226,6 +230,10 @@ def _migrate_home_news_table(conn, backend: str) -> None:
               published INTEGER DEFAULT 1,
               pinned INTEGER DEFAULT 0,
               valid_until TEXT,
+              media_url TEXT DEFAULT '',
+              media_type TEXT DEFAULT '',
+              media_name TEXT DEFAULT '',
+              attachments TEXT DEFAULT '[]',
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             )
@@ -241,6 +249,37 @@ def _migrate_home_news_table(conn, backend: str) -> None:
     ):
         try:
             conn.execute(idx_sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+
+def _migrate_home_news_media_columns(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        for col_sql in (
+            "ALTER TABLE home_news ADD COLUMN media_url VARCHAR(500) NULL",
+            "ALTER TABLE home_news ADD COLUMN media_type VARCHAR(20) NULL",
+            "ALTER TABLE home_news ADD COLUMN media_name VARCHAR(255) NULL",
+            "ALTER TABLE home_news ADD COLUMN attachments TEXT NULL",
+        ):
+            try:
+                cur.execute(col_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] != 1060:
+                    raise
+        cur.close()
+        return
+
+    for col_sql in (
+        "ALTER TABLE home_news ADD COLUMN media_url TEXT DEFAULT ''",
+        "ALTER TABLE home_news ADD COLUMN media_type TEXT DEFAULT ''",
+        "ALTER TABLE home_news ADD COLUMN media_name TEXT DEFAULT ''",
+        "ALTER TABLE home_news ADD COLUMN attachments TEXT DEFAULT '[]'",
+    ):
+        try:
+            conn.execute(col_sql)
             conn.commit()
         except sqlite3.OperationalError:
             pass
@@ -299,6 +338,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_users_classe_column(conn, "mysql")
     _migrate_users_logo_url_column(conn, "mysql")
     _migrate_home_news_table(conn, "mysql")
+    _migrate_home_news_media_columns(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -418,6 +458,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_users_admin_roles_sqlite(conn)
     _migrate_users_logo_url_column(conn, "sqlite")
     _migrate_home_news_table(conn, "sqlite")
+    _migrate_home_news_media_columns(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 from app.database import get_db
 from app.utils.platform_security import uid
@@ -28,7 +29,28 @@ def _is_expired(valid_until: str | None) -> bool:
         return False
 
 
+def _parse_attachments(val) -> list:
+    if not val:
+        return []
+    if isinstance(val, list):
+        return val
+    try:
+        parsed = json.loads(val)
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+
+def _serialize_attachments(val) -> str:
+    if not val:
+        return "[]"
+    if isinstance(val, str):
+        return val
+    return json.dumps(val)
+
+
 def _row_to_item(row) -> dict:
+    keys = row.keys() if hasattr(row, "keys") else []
     return {
         "id": row["id"],
         "scope": row["scope"],
@@ -43,6 +65,10 @@ def _row_to_item(row) -> dict:
         "body": row["body"] or "",
         "linkUrl": row["link_url"] or "",
         "linkLabel": row["link_label"] or "",
+        "mediaUrl": row["media_url"] if "media_url" in keys else "",
+        "mediaType": row["media_type"] if "media_type" in keys else "",
+        "mediaName": row["media_name"] if "media_name" in keys else "",
+        "attachments": _parse_attachments(row["attachments"] if "attachments" in keys else None),
         "published": bool(row["published"]),
         "pinned": bool(row["pinned"]),
         "validUntil": row["valid_until"] or "",
@@ -136,9 +162,10 @@ def create_home_news(actor: dict, data: dict) -> dict:
     get_db().execute(
         """INSERT INTO home_news (
           id, scope, author_role, universite, university_name, author_id, author_name,
-          category, title, excerpt, body, link_url, link_label, published, pinned,
+          category, title, excerpt, body, link_url, link_label, media_url, media_type,
+          media_name, attachments, published, pinned,
           valid_until, created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             item_id,
             scope,
@@ -157,6 +184,10 @@ def create_home_news(actor: dict, data: dict) -> dict:
             clean_text(data.get("body"), 5000) or "",
             clean_text(data.get("linkUrl"), 500) or "",
             clean_text(data.get("linkLabel"), 120) or "En savoir plus",
+            clean_text(data.get("mediaUrl"), 500) or "",
+            clean_text(data.get("mediaType"), 20) or "",
+            clean_text(data.get("mediaName"), 255) or "",
+            _serialize_attachments(data.get("attachments")),
             1 if data.get("published", True) else 0,
             1 if data.get("pinned") else 0,
             clean_text(data.get("validUntil"), 20) or None,
@@ -185,9 +216,30 @@ def update_home_news(actor: dict, item_id: str, data: dict) -> dict:
         raise ValueError("INVALID_INPUT")
 
     now = _now()
+    media_url = (
+        clean_text(data.get("mediaUrl"), 500)
+        if "mediaUrl" in data
+        else (row["media_url"] if "media_url" in row.keys() else "")
+    )
+    media_type = (
+        clean_text(data.get("mediaType"), 20)
+        if "mediaType" in data
+        else (row["media_type"] if "media_type" in row.keys() else "")
+    )
+    media_name = (
+        clean_text(data.get("mediaName"), 255)
+        if "mediaName" in data
+        else (row["media_name"] if "media_name" in row.keys() else "")
+    )
+    attachments = (
+        _serialize_attachments(data.get("attachments"))
+        if "attachments" in data
+        else _serialize_attachments(row["attachments"] if "attachments" in row.keys() else None)
+    )
     get_db().execute(
         """UPDATE home_news SET
           category=?, title=?, excerpt=?, body=?, link_url=?, link_label=?,
+          media_url=?, media_type=?, media_name=?, attachments=?,
           published=?, pinned=?, valid_until=?, updated_at=?
           WHERE id=?""",
         (
@@ -203,6 +255,10 @@ def update_home_news(actor: dict, item_id: str, data: dict) -> dict:
                 data.get("linkLabel") if "linkLabel" in data else row["link_label"], 120
             )
             or "En savoir plus",
+            media_url or "",
+            media_type or "",
+            media_name or "",
+            attachments,
             1
             if (data.get("published") if "published" in data else row["published"])
             else 0,
