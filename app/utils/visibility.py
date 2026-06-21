@@ -9,11 +9,51 @@ def _norm(s: str | None) -> str:
     return "".join(c for c in s if unicodedata.category(c) != "Mn")
 
 
+def _norm_niveau(n: str | None) -> str:
+    x = _norm(n)
+    if not x:
+        return ""
+    if x == "l1" or "licence 1" in x or "premiere licence" in x or "1ere licence" in x:
+        return "l1"
+    if x == "l2" or "licence 2" in x or "deuxieme licence" in x:
+        return "l2"
+    if x == "l3" or "licence 3" in x or "troisieme licence" in x:
+        return "l3"
+    if "master 1" in x or x in ("master1", "m1"):
+        return "master1"
+    if "master 2" in x or x in ("master2", "m2"):
+        return "master2"
+    if "doctorat" in x or x == "phd":
+        return "doctorat"
+    return x.replace(" ", "")
+
+
+def _niveau_match(student_niveau: str | None, doc_niveau: str | None) -> bool:
+    a = _norm_niveau(student_niveau)
+    b = _norm_niveau(doc_niveau)
+    if not a or not b:
+        return True
+    return a == b
+
+
+def _universite_match(student_uni: str | None, doc_uni: str | None) -> bool:
+    a, b = _norm(student_uni), _norm(doc_uni)
+    if not a or not b:
+        return True
+    return a == b
+
+
 def _filiere_match(student_filiere: str | None, doc_filiere: str | None) -> bool:
     sf, df = _norm(student_filiere), _norm(doc_filiere)
-    if not df or not sf:
+    if not df:
+        return True
+    if not sf:
         return False
-    return sf == df or sf in df or df in sf
+    if sf == df or sf in df or df in sf:
+        return True
+    sf_tokens = [t for t in sf.replace("—", " ").replace("-", " ").split() if len(t) > 3]
+    df_tokens = [t for t in df.replace("—", " ").replace("-", " ").split() if len(t) > 3]
+    return any(t in df for t in sf_tokens) or any(t in sf for t in df_tokens)
 
 
 def _classe_match(student_classe: str | None, doc_classe: str | None) -> bool:
@@ -21,7 +61,7 @@ def _classe_match(student_classe: str | None, doc_classe: str | None) -> bool:
     if not dc:
         return True
     if not sc:
-        return False
+        return True
     return sc == dc or sc in dc or dc in sc
 
 
@@ -36,12 +76,19 @@ def _section_filiere(section_id: str) -> str | None:
     return row["filiere"] if row else None
 
 
+def _teaching_audience(doc: dict) -> bool:
+    audience = _norm(doc.get("audienceType") or "ma_classe")
+    return not audience or audience in ("ma_classe", "class", "classe")
+
+
 def student_sees_document(student: dict | None, doc: dict | None) -> bool:
     if not student or not doc:
         return False
 
     if doc.get("source") == "administration":
-        if doc.get("universite") and doc["universite"] != student.get("universite"):
+        if doc.get("universite") and not _universite_match(
+            student.get("universite"), doc["universite"]
+        ):
             return False
         if doc.get("audienceType") == "section":
             doc_sid = doc.get("sectionId")
@@ -57,13 +104,13 @@ def student_sees_document(student: dict | None, doc: dict | None) -> bool:
 
     if doc.get("source") not in ("professeur", "assistant"):
         return False
-    if doc.get("audienceType") and doc["audienceType"] != "ma_classe":
+    if not _teaching_audience(doc):
         return False
-    if doc.get("universite") and doc["universite"] != student.get("universite"):
+    if doc.get("universite") and not _universite_match(
+        student.get("universite"), doc["universite"]
+    ):
         return False
-    if not doc.get("niveau") or not student.get("niveau"):
-        return False
-    if doc["niveau"] != student["niveau"]:
+    if not _niveau_match(student.get("niveau"), doc.get("niveau")):
         return False
     if not _filiere_match(student.get("filiere"), doc.get("filiere")):
         return False

@@ -26,21 +26,19 @@ def get_documents_for_student(
     offset: int = 0,
 ) -> list[dict]:
     uni = student.get("universite")
-    niveau = student.get("niveau")
     # Requête ciblée (évite de charger toute la table documents)
     rows = get_db().execute(
         """SELECT * FROM documents
            WHERE (
              source = 'administration'
-             AND (universite IS NULL OR universite = ?)
+             AND (universite IS NULL OR universite = '' OR LOWER(universite) = LOWER(?))
            ) OR (
              source IN ('professeur', 'assistant')
-             AND universite = ?
-             AND (niveau IS NULL OR niveau = ? OR ? IS NULL)
+             AND (universite IS NULL OR universite = '' OR LOWER(universite) = LOWER(?))
            )
            ORDER BY created_at DESC
            LIMIT ? OFFSET ?""",
-        (uni, uni, niveau, niveau, limit * 3, offset),
+        (uni, uni, limit * 5, offset),
     ).fetchall()
     docs = []
     for r in rows:
