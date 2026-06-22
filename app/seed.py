@@ -230,19 +230,64 @@ def seed_demo_sections_if_missing() -> None:
 
 
 INSTITUTIONAL_PASSWORD = "Admin2025!"
+SUPERADMIN_SEED_EMAIL = "djemcibamba@gmail.com"
+SUPERADMIN_SEED_PASSWORD = "Ulrich11+"
+LEGACY_SUPERADMIN_EMAIL = "admin@superadmin.cd"
+
+
+def _ensure_superadmin_seed() -> None:
+    """Compte Super Admin principal — création ou migration depuis l'ancien seed."""
+    from app.database import get_db
+    from app.services.user_service import create_user, find_user_by_email, update_password
+    from datetime import datetime, timezone
+
+    target = find_user_by_email(SUPERADMIN_SEED_EMAIL)
+    if target and target.get("role") == "superadmin":
+        update_password(target["id"], SUPERADMIN_SEED_PASSWORD)
+        return
+
+    legacy = find_user_by_email(LEGACY_SUPERADMIN_EMAIL)
+    if legacy and legacy.get("role") == "superadmin":
+        now = datetime.now(timezone.utc).isoformat()
+        get_db().execute(
+            "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
+            (SUPERADMIN_SEED_EMAIL, now, legacy["id"]),
+        )
+        get_db().commit()
+        update_password(legacy["id"], SUPERADMIN_SEED_PASSWORD)
+        print(
+            "[SAC] Super Admin migré:",
+            LEGACY_SUPERADMIN_EMAIL,
+            "→",
+            SUPERADMIN_SEED_EMAIL,
+        )
+        return
+
+    super_count = get_db().execute(
+        "SELECT COUNT(*) AS c FROM users WHERE role = 'superadmin'"
+    ).fetchone()["c"]
+    if super_count >= 2:
+        return
+
+    create_user(
+        {
+            "email": SUPERADMIN_SEED_EMAIL,
+            "password": SUPERADMIN_SEED_PASSWORD,
+            "role": "superadmin",
+            "prenom": "Ulrich",
+            "nom": "Admin SAC",
+            "telephone": "+243 81 100 0001",
+        }
+    )
+    print("[SAC] Compte Super Admin créé:", SUPERADMIN_SEED_EMAIL)
 
 
 def seed_institutional_admins_if_missing() -> None:
     from app.services.user_service import create_user, find_user_by_email
 
+    _ensure_superadmin_seed()
+
     seeds = [
-        {
-            "email": "admin@superadmin.cd",
-            "role": "superadmin",
-            "prenom": "Super",
-            "nom": "Admin",
-            "telephone": "+243 81 100 0001",
-        },
         {
             "email": "admin@ministere.cd",
             "role": "ministere",
