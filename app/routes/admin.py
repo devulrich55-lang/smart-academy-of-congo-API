@@ -30,8 +30,13 @@ ERROR_MAP = {
     "FORBIDDEN_TARGET": (403, "Suppression non autorisée pour ce compte"),
     "UNIVERSITY_MISMATCH": (403, "Ce compte n'appartient pas à votre campus"),
     "EMAIL_EXISTS": (409, "Cet e-mail est déjà utilisé"),
+    "INVALID_PHONE": (400, "Numéro de téléphone mobile invalide (ex. 085 184 8859)"),
     "PHONE_EXISTS": (409, "Ce numéro est déjà lié à un compte"),
     "IDENTITY_CONFLICT": (409, "Cette identité est déjà enregistrée"),
+    "SUPERADMIN_LIMIT": (
+        403,
+        "Limite atteinte : maximum 2 comptes Super Admin autorisés sur la plateforme.",
+    ),
 }
 
 

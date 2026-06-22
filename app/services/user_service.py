@@ -6,6 +6,7 @@ from passlib.context import CryptContext
 
 from app.config import settings
 from app.database import get_db, row_to_user
+from app.utils.campus_catalog import normalize_profile_campus, registered_campus, resolve_campus_id
 from app.utils.sanitize import (
     clean_email,
     clean_institutional_role,
@@ -65,19 +66,23 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
         raise ValueError("IDENTITY_CONFLICT")
 
     phone = clean_phone(profile.get("telephone"))
-    if not phone:
-        raise ValueError("INVALID_PHONE")
-    if find_user_by_phone(phone):
-        raise ValueError("PHONE_EXISTS")
-
     role = clean_role(profile.get("role"))
 
     if role in ("ministere", "superadmin"):
+        if not phone:
+            phone = None
+        elif find_user_by_phone(phone):
+            raise ValueError("PHONE_EXISTS")
         if not validate_person_name_text(profile.get("prenom")) or not validate_person_name_text(
             profile.get("nom")
         ):
             raise ValueError("INVALID_PROFILE")
         return phone
+
+    if not phone:
+        raise ValueError("INVALID_PHONE")
+    if find_user_by_phone(phone):
+        raise ValueError("PHONE_EXISTS")
 
     if role == "universite":
         if not validate_person_name_text(profile.get("nomUniversite"), 3):
@@ -145,20 +150,39 @@ def find_user_by_identifier(identifier: str) -> dict | None:
     return row_to_user(row)
 
 
+def migrate_user_campus_if_needed(user: dict) -> dict:
+    """Réaligne les anciens comptes (ex. UNIKIN → unkin) sur le catalogue SAC."""
+    if not user:
+        return user
+    canonical = registered_campus(user)
+    if not canonical or user.get("universite") == canonical:
+        return user
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().execute(
+        "UPDATE users SET universite = ?, updated_at = ? WHERE id = ?",
+        (canonical, now, user["id"]),
+    )
+    get_db().commit()
+    refreshed = find_user_by_id(user["id"])
+    return refreshed or {**user, "universite": canonical}
+
+
 def create_user(profile: dict) -> dict:
     email = validate_email_strict(profile.get("email")) or clean_email(profile.get("email"))
     role = clean_role(profile.get("role"))
     if not email or not role:
         raise ValueError("INVALID_PROFILE")
 
+    profile = normalize_profile_campus(dict(profile))
     phone_normalized = _assert_unique_identity(profile, email)
     password_hash = pwd_context.hash(profile["password"])
-    universite_locked = (
-        clean_text(profile.get("universite") or profile.get("sigle"), 50)
-        or clean_text(profile.get("codeUni"), 50)
-        if role == "universite"
-        else clean_text(profile.get("universite"), 50)
+    raw_campus = (
+        profile.get("universite")
+        or profile.get("universiteLocked")
+        or (profile.get("sigle") if role == "universite" else None)
+        or (profile.get("codeUni") if role == "universite" else None)
     )
+    universite_locked = resolve_campus_id(raw_campus) or clean_text(raw_campus, 50)
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -216,11 +240,7 @@ def create_user(profile: dict) -> dict:
 def user_to_session(user: dict | None) -> dict | None:
     if not user:
         return None
-    uni = (
-        user.get("universite") or user.get("sigle") or user.get("codeUni")
-        if user.get("role") == "universite"
-        else user.get("universite")
-    )
+    uni = registered_campus(user)
     is_uni = user.get("role") == "universite"
     is_institutional = user.get("role") in ("ministere", "superadmin")
     display_nom = user.get("nom", "")
@@ -254,6 +274,10 @@ def user_to_session(user: dict | None) -> dict | None:
         "nomUniversite": user.get("nomUniversite"),
         "logoUrl": user.get("logoUrl"),
         "campusTariffs": user.get("campusTariffs"),
+        "campusAcademicFees": user.get("campusAcademicFees"),
+        "universityFees": user.get("universityFees"),
+        "inscriptionFee": user.get("inscriptionFee"),
+        "payment": user.get("payment"),
     }
 
 
@@ -274,9 +298,7 @@ def _section_head_section_id(actor: dict) -> str | None:
 
 
 def _actor_campus(actor: dict) -> str | None:
-    if actor.get("role") == "universite":
-        return actor.get("universite") or actor.get("sigle") or actor.get("codeUni")
-    return actor.get("universite")
+    return registered_campus(actor) or clean_text(actor.get("universite"), 50)
 
 
 def create_section_head_account(university_actor: dict, profile: dict) -> dict:
@@ -604,15 +626,12 @@ def revoke_all_refresh_tokens(user_id: str) -> None:
 
 CAMPUS_ROLES = ("etudiant", "professeur", "assistant", "section")
 INSTITUTIONAL_ROLES = ("superadmin", "ministere", "universite")
+MAX_SUPERADMIN_ACCOUNTS = 2
 ROLE_LABELS = {
     "superadmin": "Super Admin",
     "ministere": "Ministère",
     "universite": "Admin Université",
 }
-
-
-def _actor_campus(actor: dict) -> str | None:
-    return actor.get("universite") or actor.get("codeUni") or actor.get("sigle")
 
 
 def _campus_account_row(user: dict) -> dict:
@@ -723,34 +742,47 @@ def get_campus_branding(campus_code: str) -> dict | None:
     code = clean_text(campus_code, 100)
     if not code:
         return None
+    canonical = resolve_campus_id(code) or code
     db = get_db()
     rows = db.execute(
         """SELECT * FROM users WHERE role = 'universite' AND (
           universite = ? COLLATE NOCASE OR sigle = ? COLLATE NOCASE OR code_uni = ? COLLATE NOCASE
         ) LIMIT 1""",
-        (code, code, code),
+        (canonical, canonical, canonical),
     ).fetchall()
     if not rows:
-        like = f"%{code.lower()}%"
+        like = f"%{canonical.lower()}%"
         rows = db.execute(
             """SELECT * FROM users WHERE role = 'universite' AND (
               LOWER(universite) = LOWER(?) OR LOWER(sigle) = LOWER(?)
               OR LOWER(code_uni) = LOWER(?) OR LOWER(nom_universite) LIKE ?
             ) LIMIT 1""",
-            (code, code, code, like),
+            (canonical, canonical, canonical, like),
         ).fetchall()
     if not rows:
         return None
     user = row_to_user(rows[0])
     if not user:
         return None
+    campus = registered_campus(user) or user.get("universite")
     return {
-        "universite": user.get("universite") or user.get("sigle") or user.get("codeUni"),
+        "universite": campus,
         "sigle": user.get("sigle"),
         "codeUni": user.get("codeUni"),
         "nomUniversite": user.get("nomUniversite"),
         "logoUrl": user.get("logoUrl"),
     }
+
+
+def count_superadmin_accounts() -> int:
+    row = get_db().execute(
+        "SELECT COUNT(*) AS c FROM users WHERE role = 'superadmin'"
+    ).fetchone()
+    return int(row["c"] or 0)
+
+
+def superadmin_slots_remaining() -> int:
+    return max(0, MAX_SUPERADMIN_ACCOUNTS - count_superadmin_accounts())
 
 
 def institutional_admins_summary(actor: dict) -> dict:
@@ -759,7 +791,14 @@ def institutional_admins_summary(actor: dict) -> dict:
     for admin in admins:
         if admin["role"] in by_role:
             by_role[admin["role"]] += 1
-    return {"total": len(admins), "byRole": by_role}
+    super_count = count_superadmin_accounts()
+    return {
+        "total": len(admins),
+        "byRole": by_role,
+        "superadminLimit": MAX_SUPERADMIN_ACCOUNTS,
+        "superadminCount": super_count,
+        "superadminRemaining": max(0, MAX_SUPERADMIN_ACCOUNTS - super_count),
+    }
 
 
 def create_institutional_admin(actor: dict, profile: dict) -> dict:
@@ -774,6 +813,9 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
     if not email:
         raise ValueError("INVALID_PROFILE")
 
+    if role == "superadmin" and count_superadmin_accounts() >= MAX_SUPERADMIN_ACCOUNTS:
+        raise ValueError("SUPERADMIN_LIMIT")
+
     payload: dict = {
         "email": email,
         "password": profile["password"],
@@ -783,14 +825,23 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         "nom": profile.get("nom"),
     }
     if role == "universite":
+        campus = normalize_profile_campus(
+            {
+                "role": "universite",
+                "universite": profile.get("universite") or profile.get("sigle"),
+                "nomUniversite": profile.get("nomUniversite"),
+                "sigle": profile.get("sigle"),
+                "codeUni": profile.get("codeUni"),
+            }
+        )
         payload.update(
             {
-                "nomUniversite": profile.get("nomUniversite"),
+                "nomUniversite": campus.get("nomUniversite") or profile.get("nomUniversite"),
                 "responsable": profile.get("responsable"),
-                "codeUni": profile.get("codeUni"),
-                "sigle": profile.get("sigle"),
+                "codeUni": campus.get("codeUni") or profile.get("codeUni"),
+                "sigle": campus.get("sigle") or profile.get("sigle"),
                 "ville": profile.get("ville"),
-                "universite": profile.get("universite") or profile.get("sigle"),
+                "universite": campus.get("universite"),
                 "logoUrl": profile.get("logoUrl"),
             }
         )
