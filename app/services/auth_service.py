@@ -8,10 +8,12 @@ from app.services.user_service import (
     clear_failed_logins,
     find_user_by_identifier,
     is_account_locked,
+    migrate_user_campus_if_needed,
     record_failed_login,
     user_to_session,
     verify_password,
 )
+from app.utils.campus_catalog import registered_campus, same_campus
 from app.utils.tokens import (
     generate_refresh_token_raw,
     hash_token,
@@ -74,16 +76,12 @@ def login(
     elif user["role"] in ("ministere", "superadmin"):
         raise ValueError("ADMIN_PORTAL_REQUIRED")
 
-    registered_uni = (
-        user.get("universite") or user.get("sigle") or user.get("codeUni")
-        if user["role"] == "universite"
-        else user.get("universite")
-    )
+    registered_uni = registered_campus(user)
     if (
         options.get("universite")
         and registered_uni
         and user["role"] in ("etudiant", "professeur", "assistant", "section")
-        and options["universite"] != registered_uni
+        and not same_campus(options["universite"], registered_uni)
     ):
         raise ValueError("UNIVERSITY_MISMATCH")
     if (
@@ -102,6 +100,7 @@ def login(
         raise ValueError("INVALID_CREDENTIALS")
 
     clear_failed_logins(user["id"])
+    user = migrate_user_campus_if_needed(user)
     return issue_tokens(user)
 
 
