@@ -35,6 +35,14 @@ ERROR_MAP = {
     "INVALID_REFRESH": (401, "Session expirée, reconnectez-vous"),
     "INVALID_RESET_TOKEN": (400, "Lien de réinitialisation invalide ou expiré"),
     "INVALID_PASSWORD": (400, "Mot de passe invalide (8+ caractères, lettre + chiffre, sans espace)"),
+    "EMAIL_NOT_CONFIGURED": (
+        503,
+        "L'envoi d'e-mails n'est pas configuré sur le serveur. Contactez contact@smartacademy.cd.",
+    ),
+    "EMAIL_SEND_FAILED": (
+        503,
+        "Impossible d'envoyer l'e-mail pour le moment. Réessayez dans quelques minutes ou contactez le support.",
+    ),
 }
 
 
@@ -222,7 +230,27 @@ def forgot_password_route(request: Request, body: dict):
             status_code=400,
             detail={"error": "MISSING_EMAIL", "message": "Adresse e-mail requise"},
         )
-    request_password_reset(str(email).strip())
+    status = request_password_reset(str(email).strip())
+    if status == "smtp_not_configured":
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "EMAIL_NOT_CONFIGURED",
+                "message": ERROR_MAP["EMAIL_NOT_CONFIGURED"][1],
+            },
+        )
+    if status == "send_failed":
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "EMAIL_SEND_FAILED",
+                "message": ERROR_MAP["EMAIL_SEND_FAILED"][1],
+            },
+        )
     return {
         "ok": True,
         "message": "Si un compte existe avec cet e-mail, un code à 6 chiffres vous a été envoyé par e-mail (vérifiez Gmail et les spams).",

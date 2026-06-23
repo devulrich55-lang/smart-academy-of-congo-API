@@ -1,9 +1,10 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.database import get_db
-from app.services.email_service import send_password_reset_email
+from app.services.email_service import send_password_reset_email, smtp_configured
 from app.services.user_service import (
     clear_failed_logins,
     find_user_by_email,
@@ -15,17 +16,28 @@ from app.utils.sanitize import validate_email_strict, validate_password
 from app.utils.tokens import generate_reset_code, generate_reset_token_raw, hash_token
 
 RESET_HOURS = settings.reset_token_hours
+logger = logging.getLogger("sac.password_reset")
+
+# unknown_user | sent | smtp_not_configured | send_failed
+ResetRequestStatus = str
 
 
-def request_password_reset(email: str) -> None:
+def request_password_reset(email: str) -> ResetRequestStatus:
     """Crée un token + code à 6 chiffres et envoie l'e-mail si le compte existe."""
     normalized = validate_email_strict(email)
     if not normalized:
-        return
+        return "unknown_user"
 
     user = find_user_by_email(normalized)
     if not user:
-        return
+        return "unknown_user"
+
+    if not smtp_configured():
+        logger.error(
+            "SMTP/Gmail non configuré — réinitialisation impossible pour %s",
+            normalized,
+        )
+        return "smtp_not_configured"
 
     db = get_db()
     now = datetime.now(timezone.utc)
@@ -56,12 +68,15 @@ def request_password_reset(email: str) -> None:
     display_name = get_display_name_from_user(user)
     sent = send_password_reset_email(user["email"], reset_url, display_name, reset_code)
 
-    if settings.is_prod and not sent:
+    if not sent:
         db.execute(
             "DELETE FROM password_reset_tokens WHERE user_id = ? AND used_at IS NULL",
             (user["id"],),
         )
         db.commit()
+        return "send_failed"
+
+    return "sent"
 
 
 def _consume_reset_row(stored: dict, new_password: str) -> None:
