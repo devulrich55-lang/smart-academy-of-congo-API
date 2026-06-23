@@ -846,7 +846,36 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
             }
         )
     created = create_user(payload)
+    if created and role == "universite":
+        faculty_sections = profile.get("facultySections") or []
+        if faculty_sections:
+            from app.services.reclamation_service import seed_faculty_sections_for_university
+
+            seed_faculty_sections_for_university(
+                created.get("id") or email,
+                payload.get("universite") or "",
+                faculty_sections,
+            )
     return _institutional_row(created) if created else {}
+
+
+def seed_faculty_sections_for_campus(campus: str, rows: list) -> list[dict]:
+    from app.services.reclamation_service import seed_faculty_sections_for_university
+    from app.utils.campus_catalog import resolve_campus_id, same_campus
+
+    campus_id = resolve_campus_id(campus) or campus
+    if not campus_id or not rows:
+        return []
+    db = get_db()
+    uni_rows = db.execute(
+        "SELECT id, email, universite FROM users WHERE role = 'universite'"
+    ).fetchall()
+    university_id = campus_id
+    for row in uni_rows:
+        if same_campus(campus_id, row["universite"]):
+            university_id = row["id"] or row["email"] or campus_id
+            break
+    return seed_faculty_sections_for_university(university_id, campus_id, rows)
 
 
 def delete_institutional_admin(actor: dict, email: str) -> dict:

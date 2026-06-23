@@ -150,47 +150,94 @@ def list_sections_for_actor(actor: dict) -> list[dict]:
     return []
 
 
-def find_section_for_student(universite: str, filiere: str | None) -> dict | None:
+def list_campus_sections_public(universite: str) -> list[dict]:
+    from app.utils.campus_catalog import resolve_campus_id, same_campus
+
+    raw = str(universite or "").strip()
+    campus = resolve_campus_id(raw)
+    if not campus or campus == "autre":
+        return []
     db = get_db()
     rows = db.execute(
         """SELECT * FROM faculty_sections
-           WHERE universite = ? AND active = 1""",
-        (universite,),
+           WHERE active = 1 ORDER BY filiere, name"""
     ).fetchall()
-    sf = _norm(filiere)
-    for row in rows:
-        nf = _norm(row["filiere"])
-        if sf and (nf == sf or sf in nf or nf in sf):
-            return _row_to_section(row)
-    for row in rows:
-        if _norm(row["filiere"]) == "toutes filieres":
-            return _row_to_section(row)
-    return None
+    return [
+        _row_to_section(row)
+        for row in rows
+        if same_campus(campus, row["universite"])
+    ]
 
 
-def upsert_section(actor: dict, data: dict) -> dict:
-    if actor.get("role") != "universite":
-        raise ValueError("FORBIDDEN")
-    campus = assert_campus_access(actor, data.get("universite") or _campus_for_actor(actor))
+def seed_faculty_sections_for_university(
+    university_id: str, campus: str, rows: list
+) -> list[dict]:
+    from app.utils.campus_catalog import resolve_campus_id
+
+    campus_id = resolve_campus_id(campus) or campus
+    if not campus_id or not rows:
+        return []
+    uid_key = clean_text(university_id, 120) or ""
+    created: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = clean_text(row.get("name"), 200)
+        filiere = clean_text(row.get("filiere"), 200)
+        if not name or not filiere:
+            continue
+        responsable = clean_text(
+            row.get("responsableNom")
+            or row.get("responsable_nom")
+            or row.get("responsable"),
+            200,
+        ) or "Responsable"
+        created.append(
+            _upsert_section_record(
+                uid_key,
+                campus_id,
+                {
+                    "id": row.get("id"),
+                    "name": name,
+                    "filiere": filiere,
+                    "responsableNom": responsable,
+                    "email": row.get("email") or "",
+                    "telephone": row.get("telephone") or "",
+                    "active": True,
+                },
+            )
+        )
+    return created
+
+
+def _upsert_section_record(university_id: str, campus: str, data: dict) -> dict:
     name = clean_text(data.get("name"), 200)
     filiere = clean_text(data.get("filiere"), 200)
     if not name or not filiere:
         raise ValueError("INVALID_INPUT")
-    if not clean_text(data.get("responsableNom") or data.get("responsable_nom"), 200):
-        raise ValueError("INVALID_INPUT")
+    responsable = clean_text(
+        data.get("responsableNom") or data.get("responsable_nom"), 200
+    ) or "Responsable"
 
-    section_id = clean_text(data.get("id"), 80) or uid("sec")
+    section_id = clean_text(data.get("id"), 80)
     now = _now()
     db = get_db()
+    if not section_id:
+        dup = db.execute(
+            """SELECT id FROM faculty_sections
+               WHERE universite = ? AND lower(name) = lower(?) AND lower(filiere) = lower(?)""",
+            (campus, name, filiere),
+        ).fetchone()
+        section_id = dup["id"] if dup else uid("sec")
     existing = db.execute(
         "SELECT id FROM faculty_sections WHERE id = ?", (section_id,)
     ).fetchone()
     core = (
-        actor.get("id") or actor.get("userId") or actor.get("email"),
+        university_id,
         campus,
         name,
         filiere,
-        clean_text(data.get("responsableNom") or data.get("responsable_nom"), 200),
+        responsable,
         clean_text(data.get("email"), 200).lower(),
         clean_text(data.get("telephone"), 40),
         1 if data.get("active", True) is not False else 0,
@@ -216,6 +263,34 @@ def upsert_section(actor: dict, data: dict) -> dict:
         "SELECT * FROM faculty_sections WHERE id = ?", (section_id,)
     ).fetchone()
     return _row_to_section(row)
+
+
+def find_section_for_student(universite: str, filiere: str | None) -> dict | None:
+    db = get_db()
+    rows = db.execute(
+        """SELECT * FROM faculty_sections
+           WHERE universite = ? AND active = 1""",
+        (universite,),
+    ).fetchall()
+    sf = _norm(filiere)
+    for row in rows:
+        nf = _norm(row["filiere"])
+        if sf and (nf == sf or sf in nf or nf in sf):
+            return _row_to_section(row)
+    for row in rows:
+        if _norm(row["filiere"]) == "toutes filieres":
+            return _row_to_section(row)
+    return None
+
+
+def upsert_section(actor: dict, data: dict) -> dict:
+    if actor.get("role") != "universite":
+        raise ValueError("FORBIDDEN")
+    campus = assert_campus_access(actor, data.get("universite") or _campus_for_actor(actor))
+    if not clean_text(data.get("responsableNom") or data.get("responsable_nom"), 200):
+        raise ValueError("INVALID_INPUT")
+    university_id = actor.get("id") or actor.get("userId") or actor.get("email")
+    return _upsert_section_record(university_id, campus, data)
 
 
 def update_section(actor: dict, section_id: str, data: dict) -> dict:

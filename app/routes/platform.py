@@ -6,6 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.services import ai_correction_service, audit_service, home_news_service, meeting_service, platform_service
+from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
 from app.utils.pagination import clamp_page
@@ -756,6 +757,12 @@ def campus_branding_route(universite: str = Query(..., min_length=1, max_length=
     if not branding:
         return {"universite": universite, "logoUrl": None, "nomUniversite": None}
     return branding
+
+
+@router.get("/campus-sections")
+def campus_sections_public_route(universite: str = Query(..., min_length=1, max_length=100)):
+    sections = reclamation_service.list_campus_sections_public(universite)
+    return {"sections": sections}
 
 
 @router.get("/home-news")

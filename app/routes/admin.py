@@ -15,6 +15,7 @@ from app.services.user_service import (
     list_platform_accounts,
     platform_accounts_summary,
     delete_platform_account,
+    seed_faculty_sections_for_campus,
 )
 from app.services.audit_service import activities_summary, delete_activities, list_activities
 
@@ -124,6 +125,38 @@ def create_institutional_route(
             meta={"email": created.get("email", "")[:80], "role": created.get("role")},
         )
         return {"ok": True, "admin": created}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/institutional/faculty-sections", status_code=201)
+@limiter.limit("40/hour")
+def seed_faculty_sections_route(
+    body: dict,
+    request: Request,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    del user
+    universite = str(body.get("universite") or body.get("sigle") or "").strip()
+    rows = body.get("facultySections") or []
+    if not universite or not rows:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_INPUT",
+                "message": "Université et liste de sections requises",
+            },
+        )
+    try:
+        sections = seed_faculty_sections_for_campus(universite, rows)
+        audit_service.log_audit(
+            request,
+            "seed_faculty_sections",
+            "section",
+            universite=universite,
+            meta={"count": len(sections)},
+        )
+        return {"ok": True, "sections": sections}
     except ValueError as e:
         _map_error(e)
 
