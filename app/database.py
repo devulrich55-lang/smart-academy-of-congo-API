@@ -321,6 +321,146 @@ def _migrate_users_classe_column(conn, backend: str) -> None:
         pass
 
 
+def _migrate_campus_academic_fees_columns(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        for col_sql in (
+            "ALTER TABLE users ADD COLUMN campus_academic_fees TEXT NULL",
+            "ALTER TABLE users ADD COLUMN university_fees TEXT NULL",
+            "ALTER TABLE users ADD COLUMN campus_partner_bank TEXT NULL",
+        ):
+            try:
+                cur.execute(col_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] != 1060:
+                    raise
+        cur.close()
+        return
+    for col_sql in (
+        "ALTER TABLE users ADD COLUMN campus_academic_fees TEXT",
+        "ALTER TABLE users ADD COLUMN university_fees TEXT",
+        "ALTER TABLE users ADD COLUMN campus_partner_bank TEXT",
+    ):
+        try:
+            conn.execute(col_sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+
+def _migrate_academic_payments_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS academic_payments (
+                  id VARCHAR(80) PRIMARY KEY,
+                  student_id VARCHAR(36) NOT NULL,
+                  student_email VARCHAR(255) NOT NULL,
+                  student_nom VARCHAR(200) NULL,
+                  matricule VARCHAR(50) NULL,
+                  universite VARCHAR(80) NOT NULL,
+                  fee_key VARCHAR(40) NOT NULL,
+                  fee_label VARCHAR(200) NOT NULL,
+                  amount DECIMAL(12,2) NOT NULL,
+                  currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+                  method VARCHAR(20) NOT NULL,
+                  reference VARCHAR(120) NOT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                  created_at VARCHAR(40) NOT NULL,
+                  confirmed_at VARCHAR(40) NULL,
+                  confirmed_by VARCHAR(255) NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_pay_student ON academic_payments(student_email, created_at)",
+            "CREATE INDEX idx_pay_campus ON academic_payments(universite, status, created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS academic_payments (
+              id TEXT PRIMARY KEY,
+              student_id TEXT NOT NULL,
+              student_email TEXT NOT NULL,
+              student_nom TEXT,
+              matricule TEXT,
+              universite TEXT NOT NULL,
+              fee_key TEXT NOT NULL,
+              fee_label TEXT NOT NULL,
+              amount REAL NOT NULL,
+              currency TEXT NOT NULL DEFAULT 'USD',
+              method TEXT NOT NULL,
+              reference TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              created_at TEXT NOT NULL,
+              confirmed_at TEXT,
+              confirmed_by TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pay_student ON academic_payments(student_email, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pay_campus ON academic_payments(universite, status, created_at)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_platform_tariffs_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS platform_tariffs (
+                  id VARCHAR(36) PRIMARY KEY,
+                  payload TEXT NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL,
+                  updated_by VARCHAR(255) NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS platform_tariffs (
+              id TEXT PRIMARY KEY,
+              payload TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              updated_by TEXT
+            )
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -339,6 +479,9 @@ def _connect_mysql() -> SACDatabase:
     _migrate_users_logo_url_column(conn, "mysql")
     _migrate_home_news_table(conn, "mysql")
     _migrate_home_news_media_columns(conn, "mysql")
+    _migrate_platform_tariffs_table(conn, "mysql")
+    _migrate_campus_academic_fees_columns(conn, "mysql")
+    _migrate_academic_payments_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -459,6 +602,9 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_users_logo_url_column(conn, "sqlite")
     _migrate_home_news_table(conn, "sqlite")
     _migrate_home_news_media_columns(conn, "sqlite")
+    _migrate_platform_tariffs_table(conn, "sqlite")
+    _migrate_campus_academic_fees_columns(conn, "sqlite")
+    _migrate_academic_payments_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
@@ -510,6 +656,15 @@ def row_to_user(row: Any | None) -> dict[str, Any] | None:
         "payment": _json_load(row["payment"], None),
         "inscriptionFee": _json_load(row["inscription_fee"], None),
         "campusTariffs": _json_load(row["campus_tariffs"], None),
+        "campusAcademicFees": _json_load(row["campus_academic_fees"], None)
+        if "campus_academic_fees" in keys
+        else None,
+        "universityFees": _json_load(row["university_fees"], None)
+        if "university_fees" in keys
+        else None,
+        "campusPartnerBank": _json_load(row["campus_partner_bank"], None)
+        if "campus_partner_bank" in keys
+        else None,
         "sectionId": row["section_id"] if "section_id" in keys else None,
         "classe": row["classe"] if "classe" in keys else None,
         "nomination": row["nomination"] if "nomination" in keys else None,
