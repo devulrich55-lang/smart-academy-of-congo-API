@@ -824,6 +824,10 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         "prenom": profile.get("prenom"),
         "nom": profile.get("nom"),
     }
+    if role == "ministere":
+        fonction = clean_text(profile.get("fonction"), 50)
+        if fonction:
+            payload["fonction"] = fonction
     if role == "universite":
         campus = normalize_profile_campus(
             {

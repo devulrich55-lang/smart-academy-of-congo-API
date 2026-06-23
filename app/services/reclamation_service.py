@@ -8,6 +8,15 @@ from app.utils.platform_security import assert_campus_access, uid
 from app.utils.sanitize import clean_text
 
 VALID_CATEGORIES = {
+    "academique",
+    "finance",
+    "administration",
+    "stage",
+    "horaire",
+    "document",
+    "stage_memoire",
+    "autre",
+    # anciennes catégories (réclamations déjà en base)
     "scolarite",
     "notes",
     "frais",
@@ -19,7 +28,9 @@ VALID_CATEGORIES = {
     "bibliotheque",
     "infrastructure",
     "enseignement",
-    "autre",
+    "inscription",
+    "technique",
+    "infrastructures_services",
 }
 VALID_STATUTS = {"ouverte", "en_cours", "resolue", "fermee"}
 MAX_ATTACHMENTS = 3

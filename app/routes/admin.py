@@ -34,6 +34,7 @@ ERROR_MAP = {
     "INVALID_PHONE": (400, "Numéro de téléphone mobile invalide (ex. 085 184 8859)"),
     "PHONE_EXISTS": (409, "Ce numéro est déjà lié à un compte"),
     "IDENTITY_CONFLICT": (409, "Cette identité est déjà enregistrée"),
+    "MULTI_ROLE": (409, "Cette identité est déjà liée à un autre type de compte"),
     "SUPERADMIN_LIMIT": (
         403,
         "Limite atteinte : maximum 2 comptes Super Admin autorisés sur la plateforme.",
