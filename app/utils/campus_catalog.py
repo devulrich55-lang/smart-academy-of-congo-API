@@ -43,6 +43,12 @@ INSTITUTES = [
         "sigle": "ISTM-Kin",
         "type": "institut",
     },
+    {
+        "id": "istmmayi",
+        "name": "Institut Supérieur des Techniques Médicales de Mbuji-Mayi",
+        "sigle": "ISTM MBUJIMAYI",
+        "type": "institut",
+    },
     {"id": "isstat", "name": "Institut Supérieur des Statistiques", "sigle": "ISS", "type": "institut"},
     {"id": "isau", "name": "Institut Supérieur d'Architecture et d'Urbanisme", "sigle": "ISAU", "type": "institut"},
     {"id": "isam", "name": "Institut Supérieur des Arts et Métiers", "sigle": "ISAM", "type": "institut"},
