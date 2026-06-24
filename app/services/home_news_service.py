@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import json
 
-from app.database import get_db
+from app.database import get_db, is_duplicate_key_error
 from app.utils.platform_security import uid
 from app.utils.sanitize import clean_text
 
@@ -74,6 +74,8 @@ def _row_to_item(row) -> dict:
         "validUntil": row["valid_until"] or "",
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
+        "viewCount": int(row["view_count"] or 0) if "view_count" in keys else 0,
+        "uniqueViewCount": 0,
     }
 
 
@@ -92,11 +94,30 @@ def _can_manage(actor: dict, row) -> bool:
     return False
 
 
+def _attach_view_counts(items: list[dict]) -> list[dict]:
+    if not items:
+        return items
+    ids = [item["id"] for item in items if item.get("id")]
+    if not ids:
+        return items
+    placeholders = ",".join("?" for _ in ids)
+    rows = get_db().execute(
+        f"""SELECT news_id, COUNT(*) AS c FROM home_news_views
+            WHERE news_id IN ({placeholders}) GROUP BY news_id""",
+        tuple(ids),
+    ).fetchall()
+    unique_map = {row["news_id"]: int(row["c"] or 0) for row in rows}
+    for item in items:
+        item["uniqueViewCount"] = unique_map.get(item["id"], 0)
+    return items
+
+
 def list_public_home_news() -> list[dict]:
     rows = get_db().execute(
         "SELECT * FROM home_news WHERE published = 1 ORDER BY pinned DESC, created_at DESC"
     ).fetchall()
-    return [_row_to_item(r) for r in rows if not _is_expired(r["valid_until"])]
+    items = [_row_to_item(r) for r in rows if not _is_expired(r["valid_until"])]
+    return _attach_view_counts(items)
 
 
 def list_manage_home_news(actor: dict) -> list[dict]:
@@ -121,7 +142,53 @@ def list_manage_home_news(actor: dict) -> list[dict]:
                ORDER BY created_at DESC""",
             (campus, email),
         ).fetchall()
-    return [_row_to_item(r) for r in rows]
+    items = [_row_to_item(r) for r in rows]
+    return _attach_view_counts(items)
+
+
+def record_home_news_view(item_id: str, viewer_key: str) -> dict:
+    clean_id = clean_text(item_id, 80)
+    clean_key = clean_text(viewer_key, 120)
+    if not clean_id or not clean_key:
+        raise ValueError("INVALID_INPUT")
+
+    row = get_db().execute(
+        "SELECT * FROM home_news WHERE id = ?", (clean_id,)
+    ).fetchone()
+    if not row or not row["published"] or _is_expired(row["valid_until"]):
+        raise ValueError("NOT_FOUND")
+
+    db = get_db()
+    now = _now()
+    is_new_viewer = False
+    try:
+        db.execute(
+            "INSERT INTO home_news_views (news_id, viewer_key, viewed_at) VALUES (?,?,?)",
+            (clean_id, clean_key, now),
+        )
+        is_new_viewer = True
+    except Exception as exc:
+        if not is_duplicate_key_error(exc):
+            raise
+
+    db.execute(
+        "UPDATE home_news SET view_count = COALESCE(view_count, 0) + 1, updated_at = ? WHERE id = ?",
+        (now, clean_id),
+    )
+    db.commit()
+
+    stats = db.execute(
+        "SELECT view_count FROM home_news WHERE id = ?", (clean_id,)
+    ).fetchone()
+    unique_row = db.execute(
+        "SELECT COUNT(*) AS c FROM home_news_views WHERE news_id = ?", (clean_id,)
+    ).fetchone()
+    return {
+        "ok": True,
+        "viewCount": int(stats["view_count"] or 0) if stats else 0,
+        "uniqueViewCount": int(unique_row["c"] or 0) if unique_row else 0,
+        "isNewViewer": is_new_viewer,
+    }
 
 
 def create_home_news(actor: dict, data: dict) -> dict:

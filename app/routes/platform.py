@@ -5,6 +5,7 @@ import uuid
 
 from app.config import settings
 from app.deps import get_current_user, require_roles
+from app.rate_limit import limiter
 from app.services import ai_correction_service, audit_service, home_news_service, meeting_service, platform_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
@@ -768,6 +769,18 @@ def campus_sections_public_route(universite: str = Query(..., min_length=1, max_
 @router.get("/home-news")
 def list_home_news_public():
     return {"items": home_news_service.list_public_home_news()}
+
+
+@router.post("/home-news/{item_id}/view")
+@limiter.limit("120/minute")
+def record_home_news_view_route(item_id: str, body: dict, request: Request):
+    viewer_key = str(body.get("viewerKey") or body.get("viewer_key") or "").strip()
+    if not viewer_key:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_INPUT"})
+    try:
+        return home_news_service.record_home_news_view(item_id, viewer_key)
+    except ValueError as e:
+        _handle_platform_error(e)
 
 
 @router.get("/home-news/manage")
