@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 
 from app.config import settings
 from app.deps import get_current_user, require_roles
+from app.rate_limit import limiter
 from app.services import document_service
 from app.utils.pagination import clamp_page
 from app.utils.visibility import SOURCE_BY_ROLE, student_sees_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-PUBLISH_ROLES = ("professeur", "assistant", "universite")
+PUBLISH_ROLES = ("professeur", "assistant", "universite", "section")
 MAX_SIZE = 5 * 1024 * 1024
 ALLOWED_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".mp3", ".wav", ".mp4", ".webm", ".mov", ".doc", ".docx"}
 BLOCKED_EXT = {".exe", ".bat", ".cmd", ".sh", ".php", ".js", ".html", ".svg", ".zip", ".rar"}
@@ -159,6 +160,28 @@ def delete_document_route(
     except ValueError as e:
         if str(e) == "FORBIDDEN":
             raise HTTPException(status_code=403, detail={"error": "FORBIDDEN"})
+        raise
+
+
+@router.post("/{doc_id}/view")
+@limiter.limit("120/minute")
+def record_document_view_route(
+    doc_id: str,
+    body: dict,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    viewer_key = str(body.get("viewerKey") or body.get("viewer_key") or "").strip()
+    if not viewer_key:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_INPUT"})
+    try:
+        return document_service.record_document_view(user, doc_id, viewer_key)
+    except ValueError as e:
+        code = str(e)
+        if code == "NOT_FOUND":
+            raise HTTPException(status_code=404, detail={"error": code})
+        if code in ("FORBIDDEN", "INVALID_INPUT"):
+            raise HTTPException(status_code=403 if code == "FORBIDDEN" else 400, detail={"error": code})
         raise
 
 

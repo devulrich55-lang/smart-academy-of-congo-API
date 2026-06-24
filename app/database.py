@@ -344,6 +344,65 @@ def _migrate_home_news_views(conn, backend: str) -> None:
         pass
 
 
+def _migrate_document_views(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "ALTER TABLE documents ADD COLUMN view_count INT NOT NULL DEFAULT 0"
+            )
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_views (
+                  document_id VARCHAR(36) NOT NULL,
+                  viewer_key VARCHAR(120) NOT NULL,
+                  viewed_at VARCHAR(40) NOT NULL,
+                  PRIMARY KEY (document_id, viewer_key),
+                  INDEX idx_document_views_doc (document_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            "ALTER TABLE documents ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS document_views (
+              document_id TEXT NOT NULL,
+              viewer_key TEXT NOT NULL,
+              viewed_at TEXT NOT NULL,
+              PRIMARY KEY (document_id, viewer_key)
+            )
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_document_views_doc ON document_views(document_id)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_users_logo_url_column(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -539,6 +598,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_home_news_table(conn, "mysql")
     _migrate_home_news_media_columns(conn, "mysql")
     _migrate_home_news_views(conn, "mysql")
+    _migrate_document_views(conn, "mysql")
     _migrate_platform_tariffs_table(conn, "mysql")
     _migrate_campus_academic_fees_columns(conn, "mysql")
     _migrate_academic_payments_table(conn, "mysql")
@@ -663,6 +723,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_home_news_table(conn, "sqlite")
     _migrate_home_news_media_columns(conn, "sqlite")
     _migrate_home_news_views(conn, "sqlite")
+    _migrate_document_views(conn, "sqlite")
     _migrate_platform_tariffs_table(conn, "sqlite")
     _migrate_campus_academic_fees_columns(conn, "sqlite")
     _migrate_academic_payments_table(conn, "sqlite")
@@ -737,6 +798,7 @@ def row_to_user(row: Any | None) -> dict[str, Any] | None:
 def row_to_document(row: Any | None) -> dict[str, Any] | None:
     if not row:
         return None
+    keys = row.keys() if hasattr(row, "keys") else []
     media_path = row["media_path"]
     return {
         "id": row["id"],
@@ -764,4 +826,6 @@ def row_to_document(row: Any | None) -> dict[str, Any] | None:
         "allowReactions": bool(row["allow_reactions"]),
         "reactions": _json_load(row["reactions"], {}),
         "updatedAt": row["updated_at"],
+        "viewCount": int(row["view_count"] or 0) if "view_count" in keys else 0,
+        "uniqueViewCount": 0,
     }

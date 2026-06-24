@@ -2,7 +2,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from app.database import get_db, row_to_document
+from app.database import get_db, is_duplicate_key_error, row_to_document
 from app.utils.sanitize import (
     clean_media_category,
     clean_niveau,
@@ -10,6 +10,106 @@ from app.utils.sanitize import (
     clean_text,
 )
 from app.utils.visibility import SOURCE_BY_ROLE, student_sees_document
+
+
+def _attach_view_counts(docs: list[dict]) -> list[dict]:
+    if not docs:
+        return docs
+    ids = [d["id"] for d in docs if d.get("id")]
+    if not ids:
+        return docs
+    placeholders = ",".join("?" for _ in ids)
+    rows = get_db().execute(
+        f"""SELECT document_id, COUNT(*) AS c FROM document_views
+            WHERE document_id IN ({placeholders}) GROUP BY document_id""",
+        tuple(ids),
+    ).fetchall()
+    unique_map = {row["document_id"]: int(row["c"] or 0) for row in rows}
+    for doc in docs:
+        doc["uniqueViewCount"] = unique_map.get(doc["id"], 0)
+    return docs
+
+
+def _assert_can_view_document(user: dict, doc: dict) -> None:
+    role = user.get("role")
+    if role == "etudiant":
+        student = {
+            "universite": user.get("universite"),
+            "filiere": user.get("filiere"),
+            "niveau": user.get("niveau"),
+            "classe": user.get("classe"),
+            "sectionId": user.get("sectionId"),
+            "email": user.get("email"),
+        }
+        if not student_sees_document(student, doc):
+            raise ValueError("FORBIDDEN")
+        return
+    if role == "universite":
+        if doc.get("source") == "administration":
+            campus = user.get("universite")
+            if doc.get("universite") and campus and doc.get("universite") != campus:
+                raise ValueError("FORBIDDEN")
+        return
+    if role == "section":
+        if doc.get("audienceType") == "section" and doc.get("sectionId"):
+            if user.get("sectionId") and doc.get("sectionId") != user.get("sectionId"):
+                raise ValueError("FORBIDDEN")
+        return
+    if role in ("professeur", "assistant"):
+        src = SOURCE_BY_ROLE.get(role)
+        if doc.get("source") == src and doc.get("authorId") == user.get("id"):
+            return
+        if doc.get("source") == "administration":
+            return
+        if role == "professeur" and doc.get("source") in ("professeur", "assistant"):
+            if doc.get("universite") == user.get("universite"):
+                return
+    if role in ("ministere", "superadmin"):
+        return
+    raise ValueError("FORBIDDEN")
+
+
+def record_document_view(user: dict, doc_id: str, viewer_key: str) -> dict:
+    clean_id = clean_text(doc_id, 80)
+    clean_key = clean_text(viewer_key, 120)
+    if not clean_id or not clean_key:
+        raise ValueError("INVALID_INPUT")
+    doc = get_document_by_id(clean_id)
+    if not doc:
+        raise ValueError("NOT_FOUND")
+    _assert_can_view_document(user, doc)
+
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    is_new_viewer = False
+    try:
+        db.execute(
+            "INSERT INTO document_views (document_id, viewer_key, viewed_at) VALUES (?,?,?)",
+            (clean_id, clean_key, now),
+        )
+        is_new_viewer = True
+    except Exception as exc:
+        if not is_duplicate_key_error(exc):
+            raise
+
+    db.execute(
+        "UPDATE documents SET view_count = COALESCE(view_count, 0) + 1, updated_at = ? WHERE id = ?",
+        (now, clean_id),
+    )
+    db.commit()
+
+    stats = db.execute(
+        "SELECT view_count FROM documents WHERE id = ?", (clean_id,)
+    ).fetchone()
+    unique_row = db.execute(
+        "SELECT COUNT(*) AS c FROM document_views WHERE document_id = ?", (clean_id,)
+    ).fetchone()
+    return {
+        "ok": True,
+        "viewCount": int(stats["view_count"] or 0) if stats else 0,
+        "uniqueViewCount": int(unique_row["c"] or 0) if unique_row else 0,
+        "isNewViewer": is_new_viewer,
+    }
 
 
 def get_all_documents(limit: int = 200, offset: int = 0) -> list[dict]:
@@ -46,7 +146,7 @@ def get_documents_for_student(
         if d:
             docs.append(d)
     filtered = [d for d in docs if student_sees_document(student, d)]
-    return filtered[:limit]
+    return _attach_view_counts(filtered[:limit])
 
 
 def get_my_documents(
@@ -66,6 +166,14 @@ def get_my_documents(
                ORDER BY created_at DESC LIMIT ? OFFSET ?""",
             (user.get("universite"), limit, offset),
         ).fetchall()
+    elif user.get("role") == "section" and user.get("sectionId"):
+        rows = db.execute(
+            """SELECT * FROM documents
+               WHERE source = 'administration'
+               AND audience_type = 'section' AND section_id = ?
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (user.get("sectionId"), limit, offset),
+        ).fetchall()
     else:
         rows = db.execute(
             """SELECT * FROM documents
@@ -73,14 +181,17 @@ def get_my_documents(
                ORDER BY created_at DESC LIMIT ? OFFSET ?""",
             (source, user["id"], limit, offset),
         ).fetchall()
-    return [row_to_document(r) for r in rows if row_to_document(r)]
+    return _attach_view_counts([row_to_document(r) for r in rows if row_to_document(r)])
 
 
 def get_document_by_id(doc_id: str) -> dict | None:
     row = get_db().execute(
         "SELECT * FROM documents WHERE id = ?", (doc_id,)
     ).fetchone()
-    return row_to_document(row)
+    doc = row_to_document(row)
+    if not doc:
+        return None
+    return _attach_view_counts([doc])[0]
 
 
 def can_edit(user: dict | None, doc: dict | None) -> bool:
@@ -88,6 +199,10 @@ def can_edit(user: dict | None, doc: dict | None) -> bool:
         return False
     if user.get("role") == "universite":
         return doc.get("source") == "administration"
+    if user.get("role") == "section" and doc.get("audienceType") == "section":
+        if doc.get("sectionId") and user.get("sectionId") and doc.get("sectionId") != user.get("sectionId"):
+            return False
+        return doc.get("source") == "administration" and doc.get("authorId") == user.get("id")
     src = SOURCE_BY_ROLE.get(user.get("role"))
     return src == doc.get("source") and doc.get("authorId") == user.get("id")
 
@@ -98,12 +213,18 @@ def create_document(user: dict, data: dict) -> dict:
         raise ValueError("FORBIDDEN")
 
     is_campus = user.get("role") == "universite"
-    is_section = data.get("audienceType") == "section" and data.get("sectionId")
+    is_section = user.get("role") == "section" or (
+        data.get("audienceType") == "section" and data.get("sectionId")
+    )
     doc_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     audience_type = (
         "section" if is_section else "campus" if is_campus else "ma_classe"
     )
+    section_id = clean_text(data.get("sectionId"), 80) if is_section else None
+    if is_section and not section_id:
+        section_id = clean_text(user.get("sectionId"), 80)
+    section_name = clean_text(data.get("sectionName"), 200) if is_section else None
 
     get_db().execute(
         """INSERT INTO documents (
@@ -129,8 +250,8 @@ def create_document(user: dict, data: dict) -> dict:
             data.get("mediaPath"),
             json.dumps(data.get("attachments") or []),
             audience_type,
-            clean_text(data.get("sectionId"), 80) if is_section else None,
-            clean_text(data.get("sectionName"), 200) if is_section else None,
+            section_id,
+            section_name,
             clean_text(data.get("universite") or user.get("universite"), 50),
             clean_text(data.get("filiere"), 200),
             clean_niveau(data.get("niveau")) or data.get("niveau"),

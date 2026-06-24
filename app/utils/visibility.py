@@ -121,4 +121,5 @@ SOURCE_BY_ROLE = {
     "professeur": "professeur",
     "assistant": "assistant",
     "universite": "administration",
+    "section": "administration",
 }
