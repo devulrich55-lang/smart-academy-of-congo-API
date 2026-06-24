@@ -1,6 +1,7 @@
 import unicodedata
 
 from app.database import get_db
+from app.utils.campus_catalog import same_campus
 
 
 def _norm(s: str | None) -> str:
@@ -37,10 +38,11 @@ def _niveau_match(student_niveau: str | None, doc_niveau: str | None) -> bool:
 
 
 def _universite_match(student_uni: str | None, doc_uni: str | None) -> bool:
-    a, b = _norm(student_uni), _norm(doc_uni)
-    if not a or not b:
+    if not doc_uni:
         return True
-    return a == b
+    if not student_uni:
+        return False
+    return same_campus(student_uni, doc_uni)
 
 
 def _filiere_match(student_filiere: str | None, doc_filiere: str | None) -> bool:
@@ -90,7 +92,8 @@ def student_sees_document(student: dict | None, doc: dict | None) -> bool:
             student.get("universite"), doc["universite"]
         ):
             return False
-        if doc.get("audienceType") == "section":
+        audience = _norm(doc.get("audienceType") or "campus")
+        if audience == "section":
             doc_sid = doc.get("sectionId")
             student_sid = _student_section_id(student)
             if doc_sid:

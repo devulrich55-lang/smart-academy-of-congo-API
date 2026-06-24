@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.database import get_db, is_duplicate_key_error, row_to_document
+from app.utils.campus_catalog import registered_campus
 from app.utils.sanitize import (
     clean_media_category,
     clean_niveau,
@@ -252,7 +253,7 @@ def create_document(user: dict, data: dict) -> dict:
             audience_type,
             section_id,
             section_name,
-            clean_text(data.get("universite") or user.get("universite"), 50),
+            registered_campus(user) or clean_text(data.get("universite") or user.get("universite"), 50),
             clean_text(data.get("filiere"), 200),
             clean_niveau(data.get("niveau")) or data.get("niveau"),
             clean_text(data.get("courseCode"), 30),
