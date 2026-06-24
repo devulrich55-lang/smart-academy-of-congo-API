@@ -276,19 +276,35 @@ def _upsert_section_record(university_id: str, campus: str, data: dict) -> dict:
     return _row_to_section(row)
 
 
-def find_section_for_student(universite: str, filiere: str | None) -> dict | None:
+def find_section_for_student(
+    universite: str,
+    filiere: str | None,
+    section_id: str | None = None,
+) -> dict | None:
+    from app.utils.campus_catalog import resolve_campus_id, same_campus
+
+    campus = resolve_campus_id(universite) or str(universite or "").strip().lower()
+    if not campus:
+        return None
     db = get_db()
     rows = db.execute(
-        """SELECT * FROM faculty_sections
-           WHERE universite = ? AND active = 1""",
-        (universite,),
+        """SELECT * FROM faculty_sections WHERE active = 1"""
     ).fetchall()
+    campus_rows = [r for r in rows if same_campus(campus, r["universite"])]
+    if not campus_rows:
+        return None
+
+    if section_id:
+        for row in campus_rows:
+            if row["id"] == section_id:
+                return _row_to_section(row)
+
     sf = _norm(filiere)
-    for row in rows:
+    for row in campus_rows:
         nf = _norm(row["filiere"])
         if sf and (nf == sf or sf in nf or nf in sf):
             return _row_to_section(row)
-    for row in rows:
+    for row in campus_rows:
         if _norm(row["filiere"]) == "toutes filieres":
             return _row_to_section(row)
     return None
@@ -423,7 +439,11 @@ def create_reclamation(actor: dict, data: dict) -> dict:
         raise ValueError("INVALID_INPUT")
 
     universite = actor.get("universite") or ""
-    section = find_section_for_student(universite, actor.get("filiere"))
+    section = find_section_for_student(
+        universite,
+        actor.get("filiere"),
+        actor.get("sectionId"),
+    )
     if not section:
         raise ValueError("NO_SECTION")
 
