@@ -261,7 +261,11 @@ def user_to_session(user: dict | None) -> dict | None:
     if not section_approval and user.get("role") in ("etudiant", "professeur", "assistant"):
         if payment and payment.get("sectionApproval") in ("approved", "rejected", "pending"):
             section_approval = payment.get("sectionApproval")
-        elif payment and payment.get("status") == "verified" and payment.get("method") == "section_delegate":
+        elif payment and payment.get("status") == "verified" and payment.get("method") in (
+            "section_delegate",
+            "section_validation",
+            "superadmin_validation",
+        ):
             section_approval = "approved"
         elif payment and payment.get("status") == "verified" and payment.get("verifiedBy"):
             section_approval = "approved"
@@ -452,13 +456,86 @@ def list_students_for_section(actor: dict) -> list[dict]:
         return []
 
 
+def _resolve_section_id_for_student(student: dict, actor: dict) -> str | None:
+    from app.services.reclamation_service import find_section_for_student
+    from app.utils.campus_catalog import same_campus
+
+    actor_role = actor.get("role")
+    campus = _actor_campus(actor)
+    if actor_role == "superadmin":
+        sec = find_section_for_student(
+            student.get("universite") or "",
+            student.get("filiere"),
+            student.get("sectionId"),
+        )
+        return sec["id"] if sec else student.get("sectionId")
+    if actor_role == "universite":
+        if not same_campus(student.get("universite"), campus):
+            raise ValueError("FORBIDDEN")
+        sec = find_section_for_student(
+            student.get("universite") or "",
+            student.get("filiere"),
+            student.get("sectionId"),
+        )
+        return sec["id"] if sec else student.get("sectionId")
+
+    allowed = list_students_for_section(actor)
+    student_email = str(student.get("email") or "").strip().lower()
+    if not any(str(s.get("email") or "").strip().lower() == student_email for s in allowed):
+        raise ValueError("FORBIDDEN")
+    head_section_id = _section_head_section_id(actor)
+    if student.get("sectionId"):
+        return student.get("sectionId")
+    if head_section_id:
+        return head_section_id
+    sec = find_section_for_student(
+        student.get("universite") or "",
+        student.get("filiere"),
+        None,
+    )
+    return sec["id"] if sec else None
+
+
+def student_section_approval_status(user: dict | None) -> str:
+    if not user or user.get("role") != "etudiant":
+        return "approved"
+    payment = user.get("payment") if isinstance(user.get("payment"), dict) else {}
+    raw = user.get("sectionApproval") or payment.get("sectionApproval")
+    if raw in ("approved", "rejected", "pending"):
+        return raw
+    if payment.get("status") == "verified" and (
+        payment.get("method") in ("section_delegate", "section_validation", "superadmin_validation")
+        or payment.get("verifiedBy")
+    ):
+        return "approved"
+    if payment.get("status") == "rejected" or payment.get("sectionApproval") == "rejected":
+        return "rejected"
+    return "pending"
+
+
+def list_students_for_platform_approval(actor: dict, status: str | None = "pending") -> list[dict]:
+    if actor.get("role") != "superadmin":
+        raise ValueError("FORBIDDEN")
+    rows = get_db().execute(
+        """SELECT * FROM users WHERE role = 'etudiant'
+           ORDER BY datetime(created_at) DESC LIMIT 3000"""
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        user = row_to_user(row)
+        st = student_section_approval_status(user)
+        if status and status != "all" and st != status:
+            continue
+        user["sectionApproval"] = st
+        out.append(user)
+    return out
+
+
 def set_student_section_approval(
     actor: dict, email: str, status: str, reason: str = ""
 ) -> dict:
-    from app.services.reclamation_service import find_section_for_student
-
     actor_role = actor.get("role")
-    if actor_role not in ("section", "universite", "professeur"):
+    if actor_role not in ("section", "universite", "professeur", "superadmin"):
         raise ValueError("FORBIDDEN")
     if actor_role == "professeur" and not _is_section_head_actor(actor):
         raise ValueError("FORBIDDEN")
@@ -472,33 +549,21 @@ def set_student_section_approval(
     if not student or student.get("role") != "etudiant":
         raise ValueError("NOT_FOUND")
 
-    section_id = _section_head_section_id(actor) if actor_role != "universite" else None
-    if actor_role == "universite":
-        sec = find_section_for_student(
-            student.get("universite") or "",
-            student.get("filiere"),
-            student.get("sectionId"),
-        )
-        section_id = sec["id"] if sec else student.get("sectionId")
-    else:
-        sec = find_section_for_student(
-            student.get("universite") or "",
-            student.get("filiere"),
-            section_id,
-        )
-        if not sec or sec["id"] != section_id:
-            raise ValueError("FORBIDDEN")
+    section_id = _resolve_section_id_for_student(student, actor)
 
     payment = student.get("payment") if isinstance(student.get("payment"), dict) else {}
     now = datetime.now(timezone.utc).isoformat()
     if status == "approved":
+        default_method = "superadmin_validation" if actor_role == "superadmin" else "section_validation"
         payment = {
             **payment,
             "status": "verified",
-            "method": payment.get("method") or "section_validation",
+            "method": payment.get("method") or default_method,
             "verifiedAt": now,
             "verifiedBy": actor.get("email") or actor.get("id"),
+            "verifiedByRole": actor_role,
             "sectionApproval": "approved",
+            "sectionApprovedAt": now,
         }
     else:
         payment = {

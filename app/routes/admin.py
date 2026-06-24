@@ -13,9 +13,12 @@ from app.services.user_service import (
     list_campus_accounts,
     list_institutional_admins,
     list_platform_accounts,
+    list_students_for_platform_approval,
     platform_accounts_summary,
     delete_platform_account,
     seed_faculty_sections_for_campus,
+    set_student_section_approval,
+    user_to_session,
 )
 from app.services.audit_service import activities_summary, delete_activities, list_activities
 
@@ -227,6 +230,63 @@ def delete_platform_account_route(
         )
         return result
     except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/students/pending")
+def list_platform_pending_students_route(
+    user: dict = Depends(require_roles("superadmin")),
+    status: str | None = Query("pending"),
+    universite: str | None = Query(None),
+):
+    try:
+        students = list_students_for_platform_approval(user, status=status or "pending")
+        if universite:
+            from app.utils.campus_catalog import same_campus
+
+            uni = str(universite).strip()
+            students = [s for s in students if same_campus(s.get("universite"), uni)]
+        return {
+            "students": [user_to_session(s) for s in students if s],
+            "total": len(students),
+        }
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.patch("/students/{email}/approval")
+@limiter.limit("120/hour")
+def platform_student_approval_route(
+    email: str,
+    request: Request,
+    body: dict,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    status = str(body.get("status") or "approved").strip()
+    if status == "confirmed":
+        status = "approved"
+    reason = str(body.get("reason") or "").strip()
+    try:
+        updated = set_student_section_approval(user, email, status, reason)
+        audit_service.log_audit(
+            request,
+            "approve_student_platform",
+            "user",
+            resource_id=updated.get("id"),
+            meta={
+                "email": updated.get("email", "")[:80],
+                "status": status,
+                "by": "superadmin",
+            },
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        code = str(e)
+        if code == "INVALID_STATUS":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": code, "message": "Statut de validation invalide"},
+            )
         _map_error(e)
 
 
