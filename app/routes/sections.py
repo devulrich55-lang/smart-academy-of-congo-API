@@ -8,6 +8,7 @@ from app.services.user_service import (
     create_section_head_account,
     create_student_for_section,
     list_students_for_section,
+    set_student_section_approval,
     user_to_session,
 )
 from app.utils.guards import strip_identity_fields
@@ -172,18 +173,37 @@ def create_student_route(
 def list_students_route(user: dict = Depends(_require_student_delegate)):
     students = list_students_for_section(user)
     return {
-        "students": [
-            {
-                "email": s["email"],
-                "prenom": s.get("prenom"),
-                "nom": s.get("nom"),
-                "matricule": s.get("matricule"),
-                "niveau": s.get("niveau"),
-                "classe": s.get("classe"),
-                "filiere": s.get("filiere"),
-                "sectionId": s.get("sectionId"),
-                "createdAt": s.get("createdAt"),
-            }
-            for s in students
-        ]
+        "students": [user_to_session(s) for s in students if s],
     }
+
+
+@router.patch("/students/{student_email}/approval")
+@limiter.limit("60/hour")
+def approve_student_route(
+    student_email: str,
+    request: Request,
+    body: dict,
+    user: dict = Depends(_require_student_delegate),
+):
+    status = str(body.get("status") or "approved").strip()
+    if status == "confirmed":
+        status = "approved"
+    reason = str(body.get("reason") or "").strip()
+    try:
+        updated = set_student_section_approval(user, student_email, status, reason)
+        audit_service.log_audit(
+            request,
+            "approve_student_section",
+            "user",
+            resource_id=updated.get("id"),
+            universite=user.get("universite"),
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        code = str(e)
+        if code == "INVALID_STATUS":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": code, "message": "Statut de validation invalide"},
+            )
+        _map_error(e)

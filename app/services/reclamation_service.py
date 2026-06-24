@@ -302,7 +302,20 @@ def find_section_for_student(
     sf = _norm(filiere)
     for row in campus_rows:
         nf = _norm(row["filiere"])
-        if sf and (nf == sf or sf in nf or nf in sf):
+        nn = _norm(row["name"])
+        if sf and (
+            nf == sf
+            or sf in nf
+            or nf in sf
+            or sf in nn
+            or nn in sf
+            or (nf and nf in sf)
+        ):
+            return _row_to_section(row)
+        # Mot-clé domaine partagé (ex. « informatique »)
+        sf_tokens = [w for w in sf.split() if len(w) >= 5]
+        nf_tokens = set((nf + " " + nn).split())
+        if sf_tokens and any(t in nf_tokens for t in sf_tokens):
             return _row_to_section(row)
     for row in campus_rows:
         if _norm(row["filiere"]) == "toutes filieres":

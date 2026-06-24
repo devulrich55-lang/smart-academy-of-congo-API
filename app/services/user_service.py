@@ -186,6 +186,14 @@ def create_user(profile: dict) -> dict:
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
+    section_id = clean_text(profile.get("sectionId"), 80) or None
+    if role == "etudiant" and not section_id:
+        from app.services.reclamation_service import find_section_for_student
+
+        sec = find_section_for_student(universite_locked, profile.get("filiere"))
+        if sec:
+            section_id = sec["id"]
+
     get_db().execute(
         """INSERT INTO users (
           id, email, password_hash, role, prenom, nom, telephone, universite,
@@ -227,7 +235,7 @@ def create_user(profile: dict) -> dict:
             if profile.get("inscriptionFee")
             else None,
             clean_text(profile.get("classe"), 150) or None,
-            clean_text(profile.get("sectionId"), 80) or None,
+            section_id,
             _clean_logo_url(profile.get("logoUrl")),
             now,
             now,
@@ -248,6 +256,19 @@ def user_to_session(user: dict | None) -> dict | None:
         display_nom = user.get("nomUniversite") or user.get("email", "")
     elif is_institutional:
         display_nom = user.get("nom", "") or user.get("email", "")
+    payment = user.get("payment") if isinstance(user.get("payment"), dict) else None
+    section_approval = user.get("sectionApproval")
+    if not section_approval and user.get("role") in ("etudiant", "professeur", "assistant"):
+        if payment and payment.get("sectionApproval") in ("approved", "rejected", "pending"):
+            section_approval = payment.get("sectionApproval")
+        elif payment and payment.get("status") == "verified" and payment.get("method") == "section_delegate":
+            section_approval = "approved"
+        elif payment and payment.get("status") == "verified" and payment.get("verifiedBy"):
+            section_approval = "approved"
+        elif payment:
+            section_approval = "pending"
+        elif user.get("createdAt"):
+            section_approval = "pending"
     return {
         "role": user["role"],
         "identifiant": user["email"],
@@ -268,6 +289,8 @@ def user_to_session(user: dict | None) -> dict | None:
         "classe": user.get("classe"),
         "sectionId": user.get("sectionId"),
         "sectionName": user.get("sectionName"),
+        "sectionApproval": section_approval,
+        "sectionApprovalRequestedAt": user.get("createdAt"),
         "nomination": user.get("nomination"),
         "grade": user.get("grade"),
         "fonction": user.get("fonction"),
@@ -277,7 +300,9 @@ def user_to_session(user: dict | None) -> dict | None:
         "campusAcademicFees": user.get("campusAcademicFees"),
         "universityFees": user.get("universityFees"),
         "inscriptionFee": user.get("inscriptionFee"),
-        "payment": user.get("payment"),
+        "payment": payment,
+        "paymentStatus": payment.get("status") if payment else None,
+        "createdAt": user.get("createdAt"),
     }
 
 
@@ -363,6 +388,9 @@ def create_student_for_section(actor: dict, profile: dict) -> dict:
 
 
 def list_students_for_section(actor: dict) -> list[dict]:
+    from app.services.reclamation_service import find_section_for_student
+    from app.utils.campus_catalog import same_campus
+
     db = get_db()
     actor_role = actor.get("role")
     campus = _actor_campus(actor)
@@ -371,23 +399,128 @@ def list_students_for_section(actor: dict) -> list[dict]:
         section_id = _section_head_section_id(actor)
         if not section_id:
             return []
+        section_row = db.execute(
+            "SELECT * FROM faculty_sections WHERE id = ?", (section_id,)
+        ).fetchone()
+        if not section_row:
+            return []
+        section_campus = section_row["universite"]
         rows = db.execute(
-            """SELECT * FROM users
-               WHERE role = 'etudiant' AND section_id = ?
-               ORDER BY created_at DESC""",
-            (section_id,),
+            """SELECT * FROM users WHERE role = 'etudiant' ORDER BY created_at DESC"""
         ).fetchall()
+        matched: list[dict] = []
+        now = datetime.now(timezone.utc).isoformat()
+        dirty = False
+        for row in rows:
+            user = row_to_user(row)
+            if not same_campus(user.get("universite"), section_campus):
+                continue
+            belongs = row["section_id"] == section_id
+            if not belongs:
+                resolved = find_section_for_student(
+                    user.get("universite") or "",
+                    user.get("filiere"),
+                    row["section_id"],
+                )
+                belongs = bool(resolved and resolved["id"] == section_id)
+                if belongs and not row["section_id"]:
+                    db.execute(
+                        "UPDATE users SET section_id = ?, updated_at = ? WHERE id = ?",
+                        (section_id, now, row["id"]),
+                    )
+                    dirty = True
+                    user = row_to_user(
+                        db.execute(
+                            "SELECT * FROM users WHERE id = ?", (row["id"],)
+                        ).fetchone()
+                    )
+            if belongs:
+                matched.append(user)
+        if dirty:
+            db.commit()
+        return matched
     elif actor_role == "universite" and campus:
         rows = db.execute(
-            """SELECT * FROM users
-               WHERE role = 'etudiant' AND universite = ?
-               ORDER BY created_at DESC""",
-            (campus,),
+            """SELECT * FROM users WHERE role = 'etudiant' ORDER BY created_at DESC"""
         ).fetchall()
+        return [
+            row_to_user(r)
+            for r in rows
+            if r and same_campus(row_to_user(r).get("universite"), campus)
+        ]
     else:
         return []
 
-    return [row_to_user(r) for r in rows if r]
+
+def set_student_section_approval(
+    actor: dict, email: str, status: str, reason: str = ""
+) -> dict:
+    from app.services.reclamation_service import find_section_for_student
+
+    actor_role = actor.get("role")
+    if actor_role not in ("section", "universite", "professeur"):
+        raise ValueError("FORBIDDEN")
+    if actor_role == "professeur" and not _is_section_head_actor(actor):
+        raise ValueError("FORBIDDEN")
+    if status not in ("approved", "rejected"):
+        raise ValueError("INVALID_STATUS")
+
+    target_email = validate_email_strict(email) or clean_email(email)
+    if not target_email:
+        raise ValueError("INVALID_INPUT")
+    student = find_user_by_email(target_email)
+    if not student or student.get("role") != "etudiant":
+        raise ValueError("NOT_FOUND")
+
+    section_id = _section_head_section_id(actor) if actor_role != "universite" else None
+    if actor_role == "universite":
+        sec = find_section_for_student(
+            student.get("universite") or "",
+            student.get("filiere"),
+            student.get("sectionId"),
+        )
+        section_id = sec["id"] if sec else student.get("sectionId")
+    else:
+        sec = find_section_for_student(
+            student.get("universite") or "",
+            student.get("filiere"),
+            section_id,
+        )
+        if not sec or sec["id"] != section_id:
+            raise ValueError("FORBIDDEN")
+
+    payment = student.get("payment") if isinstance(student.get("payment"), dict) else {}
+    now = datetime.now(timezone.utc).isoformat()
+    if status == "approved":
+        payment = {
+            **payment,
+            "status": "verified",
+            "method": payment.get("method") or "section_validation",
+            "verifiedAt": now,
+            "verifiedBy": actor.get("email") or actor.get("id"),
+            "sectionApproval": "approved",
+        }
+    else:
+        payment = {
+            **payment,
+            "status": "rejected",
+            "sectionApproval": "rejected",
+            "rejectionReason": clean_text(reason, 300) or "",
+            "rejectedAt": now,
+            "rejectedBy": actor.get("email") or actor.get("id"),
+        }
+
+    get_db().execute(
+        """UPDATE users SET section_id = ?, payment = ?, updated_at = ? WHERE id = ?""",
+        (
+            section_id or student.get("sectionId"),
+            json.dumps(payment),
+            now,
+            student["id"],
+        ),
+    )
+    get_db().commit()
+    return find_user_by_id(student["id"])
 
 
 def list_students_for_professor(actor: dict) -> list[dict]:
