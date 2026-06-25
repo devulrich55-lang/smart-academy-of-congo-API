@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, home_news_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, home_news_service, library_service, meeting_service, platform_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -819,6 +819,65 @@ def delete_home_news_route(
         return home_news_service.delete_home_news(user, item_id)
     except ValueError as e:
         _handle_platform_error(e)
+
+
+@router.get("/library")
+def list_library_public():
+    return {"items": library_service.list_public_books()}
+
+
+@router.get("/library/manage")
+def list_library_manage(user: dict = Depends(require_roles("ministere"))):
+    try:
+        return {"items": library_service.list_manage_books(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/library", status_code=201)
+def create_library_route(body: dict, user: dict = Depends(require_roles("ministere"))):
+    try:
+        item = library_service.create_book(user, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/library/{item_id}")
+def update_library_route(
+    item_id: str, body: dict, user: dict = Depends(require_roles("ministere"))
+):
+    try:
+        item = library_service.update_book(user, item_id, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.delete("/library/{item_id}")
+def delete_library_route(item_id: str, user: dict = Depends(require_roles("ministere"))):
+    try:
+        return library_service.delete_book(user, item_id)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/library/upload")
+async def upload_library_file_route(
+    files: list[UploadFile] = File(...),
+    user: dict = Depends(require_roles("ministere")),
+):
+    del user
+    saved = await _save_home_news_uploads(files)
+    if not saved:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_INPUT"})
+    primary = saved[0]
+    return {
+        "ok": True,
+        "fileUrl": primary["mediaUrl"],
+        "fileName": primary["name"],
+        "mediaType": primary["mediaType"],
+    }
 
 
 def _handle_platform_error(exc: ValueError) -> None:

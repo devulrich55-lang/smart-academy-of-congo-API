@@ -579,6 +579,76 @@ def _migrate_platform_tariffs_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_digital_library_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS digital_library (
+                  id VARCHAR(80) PRIMARY KEY,
+                  title VARCHAR(200) NOT NULL,
+                  author VARCHAR(120) NULL,
+                  category VARCHAR(40) NOT NULL,
+                  description TEXT NULL,
+                  language VARCHAR(20) NOT NULL DEFAULT 'fr',
+                  file_url VARCHAR(500) NULL,
+                  cover_url VARCHAR(500) NULL,
+                  published TINYINT(1) NOT NULL DEFAULT 1,
+                  author_id VARCHAR(255) NOT NULL,
+                  author_role VARCHAR(20) NOT NULL DEFAULT 'ministere',
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_library_pub ON digital_library(published, created_at)",
+            "CREATE INDEX idx_library_cat ON digital_library(category, published)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS digital_library (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              author TEXT,
+              category TEXT NOT NULL,
+              description TEXT,
+              language TEXT NOT NULL DEFAULT 'fr',
+              file_url TEXT,
+              cover_url TEXT,
+              published INTEGER NOT NULL DEFAULT 1,
+              author_id TEXT NOT NULL,
+              author_role TEXT NOT NULL DEFAULT 'ministere',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_library_pub ON digital_library(published, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_library_cat ON digital_library(category, published)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -602,6 +672,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_platform_tariffs_table(conn, "mysql")
     _migrate_campus_academic_fees_columns(conn, "mysql")
     _migrate_academic_payments_table(conn, "mysql")
+    _migrate_digital_library_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -727,6 +798,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_platform_tariffs_table(conn, "sqlite")
     _migrate_campus_academic_fees_columns(conn, "sqlite")
     _migrate_academic_payments_table(conn, "sqlite")
+    _migrate_digital_library_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
