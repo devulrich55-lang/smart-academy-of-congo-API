@@ -732,6 +732,128 @@ def _migrate_diplomas_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_platform_courses_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS platform_courses (
+                  id VARCHAR(80) PRIMARY KEY,
+                  code VARCHAR(40) NOT NULL,
+                  title VARCHAR(200) NOT NULL,
+                  description TEXT NULL,
+                  category VARCHAR(40) NOT NULL DEFAULT 'mooc',
+                  universite VARCHAR(80) NOT NULL,
+                  university_name VARCHAR(200) NULL,
+                  filiere VARCHAR(120) NULL,
+                  niveau VARCHAR(40) NULL,
+                  classe VARCHAR(120) NULL,
+                  professor_email VARCHAR(255) NULL,
+                  professor_name VARCHAR(200) NULL,
+                  cover_url VARCHAR(500) NULL,
+                  resource_url VARCHAR(500) NULL,
+                  duration_hours INT NOT NULL DEFAULT 0,
+                  credits INT NOT NULL DEFAULT 0,
+                  published TINYINT(1) NOT NULL DEFAULT 1,
+                  author_id VARCHAR(255) NULL,
+                  author_role VARCHAR(20) NULL,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS course_enrollments (
+                  id VARCHAR(80) PRIMARY KEY,
+                  course_id VARCHAR(80) NOT NULL,
+                  student_email VARCHAR(255) NOT NULL,
+                  student_name VARCHAR(200) NULL,
+                  matricule VARCHAR(50) NULL,
+                  universite VARCHAR(80) NOT NULL,
+                  progress INT NOT NULL DEFAULT 0,
+                  status VARCHAR(20) NOT NULL DEFAULT 'active',
+                  enrolled_at VARCHAR(40) NOT NULL,
+                  UNIQUE KEY uq_course_student (course_id, student_email)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_courses_campus ON platform_courses(universite, published, created_at)",
+            "CREATE INDEX idx_enroll_student ON course_enrollments(student_email, enrolled_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS platform_courses (
+              id TEXT PRIMARY KEY,
+              code TEXT NOT NULL,
+              title TEXT NOT NULL,
+              description TEXT,
+              category TEXT NOT NULL DEFAULT 'mooc',
+              universite TEXT NOT NULL,
+              university_name TEXT,
+              filiere TEXT,
+              niveau TEXT,
+              classe TEXT,
+              professor_email TEXT,
+              professor_name TEXT,
+              cover_url TEXT,
+              resource_url TEXT,
+              duration_hours INTEGER NOT NULL DEFAULT 0,
+              credits INTEGER NOT NULL DEFAULT 0,
+              published INTEGER NOT NULL DEFAULT 1,
+              author_id TEXT,
+              author_role TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS course_enrollments (
+              id TEXT PRIMARY KEY,
+              course_id TEXT NOT NULL,
+              student_email TEXT NOT NULL,
+              student_name TEXT,
+              matricule TEXT,
+              universite TEXT NOT NULL,
+              progress INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'active',
+              enrolled_at TEXT NOT NULL,
+              UNIQUE(course_id, student_email)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_courses_campus ON platform_courses(universite, published, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_enroll_student ON course_enrollments(student_email, enrolled_at DESC)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -757,6 +879,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_academic_payments_table(conn, "mysql")
     _migrate_digital_library_table(conn, "mysql")
     _migrate_diplomas_table(conn, "mysql")
+    _migrate_platform_courses_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -884,6 +1007,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_academic_payments_table(conn, "sqlite")
     _migrate_digital_library_table(conn, "sqlite")
     _migrate_diplomas_table(conn, "sqlite")
+    _migrate_platform_courses_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

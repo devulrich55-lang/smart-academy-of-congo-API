@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, platform_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -962,6 +962,94 @@ def _handle_diploma_error(exc: ValueError) -> None:
             detail={"error": code, "message": "Étudiant introuvable sur votre campus."},
         )
     _handle_platform_error(exc)
+
+
+@router.get("/courses")
+def list_courses_public(
+    universite: str | None = Query(None),
+):
+    code = clean_text_universite(universite) if universite else None
+    return {"items": course_service.list_public(code)}
+
+
+@router.get("/courses/for-student")
+def list_courses_for_student(user: dict = Depends(require_roles("etudiant"))):
+    try:
+        return {"courses": course_service.list_for_student(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/courses/enrollments/me")
+def list_my_course_enrollments(user: dict = Depends(require_roles("etudiant"))):
+    try:
+        return {"enrollments": course_service.list_my_enrollments(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/courses/manage")
+def list_courses_manage(
+    user: dict = Depends(require_roles("universite", "professeur")),
+):
+    try:
+        return {"items": course_service.list_manage(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/courses", status_code=201)
+def create_course_route(
+    body: dict,
+    user: dict = Depends(require_roles("universite", "professeur")),
+):
+    try:
+        item = course_service.create_course(user, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/courses/{course_id}")
+def update_course_route(
+    course_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("universite", "professeur")),
+):
+    try:
+        item = course_service.update_course(user, course_id, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.delete("/courses/{course_id}")
+def delete_course_route(
+    course_id: str,
+    user: dict = Depends(require_roles("universite", "professeur")),
+):
+    try:
+        return course_service.delete_course(user, course_id)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/courses/{course_id}/enroll", status_code=201)
+def enroll_course_route(
+    course_id: str,
+    user: dict = Depends(require_roles("etudiant")),
+):
+    try:
+        enrollment = course_service.enroll(user, course_id)
+        return {"ok": True, "enrollment": enrollment}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+def clean_text_universite(val: str | None) -> str | None:
+    from app.utils.sanitize import clean_text
+
+    return clean_text(val, 80)
 
 
 def _handle_platform_error(exc: ValueError) -> None:
