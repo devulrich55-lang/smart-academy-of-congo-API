@@ -826,10 +826,19 @@ def list_library_public():
     return {"items": library_service.list_public_books()}
 
 
+@router.get("/dictionary/languages")
+def dictionary_languages_route():
+    return {"languages": dictionary_service.list_languages()}
+
+
 @router.get("/dictionary/translate")
-def translate_dictionary_route(q: str = Query(..., min_length=1, max_length=80)):
+def translate_dictionary_route(
+    q: str = Query(..., min_length=1, max_length=80),
+    source: str = Query("auto", max_length=8),
+    target: str = Query("auto", max_length=8),
+):
     try:
-        return dictionary_service.lookup(q)
+        return dictionary_service.lookup(q, source_lang=source, target_lang=target)
     except ValueError as e:
         _handle_platform_error(e)
 
@@ -900,4 +909,9 @@ def _handle_platform_error(exc: ValueError) -> None:
         raise HTTPException(status_code=404, detail={"error": code})
     if code == "INVALID_INPUT":
         raise HTTPException(status_code=400, detail={"error": code})
+    if code == "INVALID_LANG":
+        raise HTTPException(
+            status_code=400,
+            detail={"error": code, "message": "Langue non prise en charge ou identique."},
+        )
     raise exc
