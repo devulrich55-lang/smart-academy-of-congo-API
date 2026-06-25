@@ -202,7 +202,7 @@ def _lookup_wiktionary_extract(word: str, lang: str) -> tuple[str, list[dict], l
     site_lang, _ = _WIKI_SITE.get(lang, ("fr", "fr"))
     url = (
         f"https://{site_lang}.wiktionary.org/w/api.php?action=query&prop=extracts"
-        f"&exintro&explaintext&redirects=1&titles={quote(word)}&format=json"
+        f"&exintro&explaintext&redirects=1&titles={quote(word)}&format=json&origin=*"
     )
     data = _fetch_json(url)
     if not isinstance(data, dict):
