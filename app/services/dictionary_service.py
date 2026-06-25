@@ -2,7 +2,7 @@ import json
 import re
 import unicodedata
 from urllib.error import URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.utils.sanitize import clean_text
@@ -17,58 +17,243 @@ LANGUAGES = {
     "lua": {"id": "lua", "label": "Tshiluba", "native": "Tshiluba"},
 }
 
-_FRENCH_HINTS = frozenset(
-    {
-        "le", "la", "les", "un", "une", "des", "et", "ou", "de", "du", "au", "aux",
-        "je", "tu", "il", "elle", "nous", "vous", "avec", "sans", "pour", "dans",
-        "école", "livre", "étudiant", "professeur", "université", "bibliothèque", "bonjour",
-    }
-)
-_SPANISH_HINTS = frozenset(
-    {
-        "el", "la", "los", "las", "un", "una", "y", "o", "de", "del", "hola", "gracias",
-        "escuela", "libro", "estudiante", "profesor", "universidad", "biblioteca",
-    }
-)
-_LINGALA_HINTS = frozenset(
-    {"mbote", "malamu", "libota", "mobali", "mwasi", "eteyi", "ndako", "moninga", "bolingo"}
-)
-_TSHILUBA_HINTS = frozenset(
-    {"moyo", "diaku", "tshimuna", "mutekela", "dibuku", "tshikondo", "muaku"}
-)
+_API_LANGS = frozenset({"fr", "en", "es"})
 
-LOCAL_GLOSSARY: list[tuple[str, str, str, str]] = [
-    ("livre", "fr", "en", "book"),
-    ("book", "en", "fr", "livre"),
-    ("école", "fr", "en", "school"),
-    ("school", "en", "fr", "école"),
-    ("bonjour", "fr", "en", "hello"),
-    ("hello", "en", "fr", "bonjour"),
-    ("libro", "es", "fr", "livre"),
-    ("livre", "fr", "es", "libro"),
-    ("escuela", "es", "fr", "école"),
-    ("école", "fr", "es", "escuela"),
-    ("hola", "es", "fr", "bonjour"),
-    ("bonjour", "fr", "es", "hola"),
-    ("mbote", "ln", "fr", "bonjour"),
-    ("bonjour", "fr", "ln", "mbote"),
-    ("malamu", "ln", "fr", "bien"),
-    ("bien", "fr", "ln", "malamu"),
-    ("eteyi", "ln", "fr", "école"),
-    ("école", "fr", "ln", "eteyi"),
-    ("ndako", "ln", "fr", "maison"),
-    ("maison", "fr", "ln", "ndako"),
-    ("moninga", "ln", "fr", "ami"),
-    ("ami", "fr", "ln", "moninga"),
-    ("moyo", "lua", "fr", "vie"),
-    ("vie", "fr", "lua", "moyo"),
-    ("diaku", "lua", "fr", "ami"),
-    ("ami", "fr", "lua", "diaku"),
-    ("dibuku", "lua", "fr", "livre"),
-    ("livre", "fr", "lua", "dibuku"),
-    ("tshikondo", "lua", "fr", "école"),
-    ("école", "fr", "lua", "tshikondo"),
-]
+LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
+    ("fr", "livre"): {
+        "phonetic": "/livʁ/",
+        "meanings": [
+            {
+                "partOfSpeech": "nom masculin",
+                "definitions": [
+                    {
+                        "text": "Ouvrage composé de feuilles imprimées ou manuscrites, réunies sous une couverture.",
+                        "example": "Un livre d'histoire.",
+                    },
+                    {
+                        "text": "Ensemble des ouvrages traitant d'une discipline.",
+                        "example": "Le livre de droit.",
+                    },
+                ],
+            }
+        ],
+        "synonyms": ["ouvrage", "volume", "manuel"],
+    },
+    ("fr", "ecole"): {
+        "phonetic": "/ekɔl/",
+        "meanings": [
+            {
+                "partOfSpeech": "nom féminin",
+                "definitions": [
+                    {
+                        "text": "Établissement où l'on dispense un enseignement organisé.",
+                        "example": "Aller à l'école.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["établissement scolaire", "institution"],
+    },
+    ("fr", "etudiant"): {
+        "phonetic": "/etydjɑ̃/",
+        "meanings": [
+            {
+                "partOfSpeech": "nom",
+                "definitions": [
+                    {
+                        "text": "Personne qui suit des études dans un établissement d'enseignement supérieur ou secondaire.",
+                        "example": "Un étudiant en médecine.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["élève", "apprenant"],
+    },
+    ("en", "book"): {
+        "phonetic": "/bʊk/",
+        "meanings": [
+            {
+                "partOfSpeech": "noun",
+                "definitions": [
+                    {
+                        "text": "A written or printed work consisting of pages bound together.",
+                        "example": "She borrowed a book from the library.",
+                    },
+                    {
+                        "text": "A set of blank sheets for writing or keeping records.",
+                        "example": "an exercise book",
+                    },
+                ],
+            }
+        ],
+        "synonyms": ["volume", "publication", "tome"],
+    },
+    ("en", "school"): {
+        "phonetic": "/skuːl/",
+        "meanings": [
+            {
+                "partOfSpeech": "noun",
+                "definitions": [
+                    {
+                        "text": "An institution for educating children or providing specialized instruction.",
+                        "example": "He walks to school every morning.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["academy", "college", "institution"],
+    },
+    ("es", "libro"): {
+        "phonetic": "/ˈliβɾo/",
+        "meanings": [
+            {
+                "partOfSpeech": "sustantivo masculino",
+                "definitions": [
+                    {
+                        "text": "Conjunto de hojas impresas o manuscritas encuadernadas.",
+                        "example": "Leí un libro de historia.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["obra", "volumen", "manual"],
+    },
+    ("es", "escuela"): {
+        "phonetic": "/esˈkwela/",
+        "meanings": [
+            {
+                "partOfSpeech": "sustantivo femenino",
+                "definitions": [
+                    {
+                        "text": "Establecimiento donde se imparte enseñanza.",
+                        "example": "Los niños van a la escuela.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["colegio", "instituto"],
+    },
+    ("ln", "mbote"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "interjection",
+                "definitions": [
+                    {
+                        "text": "Maloba ya kozwa moko to koleka na mboka. (Salutation pour dire bonjour ou bonsoir.)",
+                        "example": "Mbote mingi !",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["malamu"],
+    },
+    ("ln", "eteyi"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "nom",
+                "definitions": [
+                    {
+                        "text": "Esika oyo bato bandakisi maboko na boyekoli.",
+                        "example": "Eteyi ya université.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["kelasi"],
+    },
+    ("ln", "ndako"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "nom",
+                "definitions": [
+                    {
+                        "text": "Esika ya kolala to ya kofanda na libota.",
+                        "example": "Ndako ya moninga.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["ndako ya mboka"],
+    },
+    ("ln", "moninga"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "nom",
+                "definitions": [
+                    {
+                        "text": "Moto oyo ozali na boyokani malamu na ye.",
+                        "example": "Moninga na ngai.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["ndeko"],
+    },
+    ("lua", "moyo"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "tshibusa",
+                "definitions": [
+                    {
+                        "text": "Bukole bwa kufwala bwa muntu.",
+                        "example": "Moyo wa ngwej.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": [],
+    },
+    ("lua", "diaku"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "tshibusa",
+                "definitions": [
+                    {
+                        "text": "Muntu udi mukaji wa bungi ne wenze.",
+                        "example": "Diaku dianyi.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": ["mukaji"],
+    },
+    ("lua", "dibuku"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "tshibusa",
+                "definitions": [
+                    {
+                        "text": "Dijadika dia makanda adibu bua kutanga.",
+                        "example": "Dibuku dia bena kudia.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": [],
+    },
+    ("lua", "tshikondo"): {
+        "phonetic": "",
+        "meanings": [
+            {
+                "partOfSpeech": "tshibusa",
+                "definitions": [
+                    {
+                        "text": "Tshitupa tshia bena kuela.",
+                        "example": "Tshikondo tshia université.",
+                    }
+                ],
+            }
+        ],
+        "synonyms": [],
+    },
+}
 
 
 def list_languages() -> list[dict]:
@@ -84,25 +269,6 @@ def _fetch_json(url: str, timeout: float = 8.0) -> dict | list | None:
         return None
 
 
-def _post_json(url: str, payload: dict, timeout: float = 8.0) -> dict | None:
-    body = urlencode(payload).encode("utf-8")
-    req = Request(
-        url,
-        data=body,
-        headers={
-            "User-Agent": "SmartAcademyCongo/1.0",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data if isinstance(data, dict) else None
-    except (URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return None
-
-
 def _normalize_key(word: str) -> str:
     return (
         unicodedata.normalize("NFD", word.strip().lower())
@@ -111,177 +277,107 @@ def _normalize_key(word: str) -> str:
     )
 
 
-def _resolve_lang(code: str | None) -> str | None:
-    if not code:
-        return None
-    clean = clean_text(code, 8).lower()
-    if clean in ("auto", "detect", "any"):
-        return None
+def _resolve_lang(code: str | None) -> str:
+    clean = clean_text(code or "fr", 8).lower()
     if clean not in LANGUAGES:
         raise ValueError("INVALID_LANG")
     return clean
 
 
-def _detect_source_lang(word: str) -> str:
-    key = _normalize_key(word)
-    if key in _LINGALA_HINTS:
-        return "ln"
-    if key in _TSHILUBA_HINTS:
-        return "lua"
-    if re.search(r"[àâäéèêëïîôùûüçœæ]", word, re.I):
-        return "fr"
-    if re.search(r"[ñáéíóúü]", word, re.I) or key in _SPANISH_HINTS:
-        return "es"
-    if key in _FRENCH_HINTS or word.strip().endswith(("tion", "ment", "eux", "euse", "ique")):
-        return "fr"
-    if word.strip().endswith(("ción", "ado", "ada", "mente")):
-        return "es"
-    return "en"
+def _parse_api_entry(entries: list) -> tuple[str, list[dict], list[str]]:
+    if not entries or not isinstance(entries[0], dict):
+        return "", [], []
 
-
-def _default_target(source: str) -> str:
-    order = ["fr", "en", "es", "ln", "lua"]
-    for lang in order:
-        if lang != source:
-            return lang
-    return "en"
-
-
-def _lookup_local(word: str, source: str, target: str) -> tuple[str, list[str]]:
-    key = _normalize_key(word)
-    for entry, src, tgt, translation in LOCAL_GLOSSARY:
-        if _normalize_key(entry) == key and src == source and tgt == target:
-            return translation, []
-    for entry, src, tgt, translation in LOCAL_GLOSSARY:
-        if _normalize_key(entry) == key and src == target and tgt == source:
-            return translation, []
-    return "", []
-
-
-def _translate_mymemory(word: str, source: str, target: str) -> tuple[str, list[str]]:
-    pair = f"{source}|{target}"
-    url = (
-        "https://api.mymemory.translated.net/get?q="
-        + quote(word)
-        + "&langpair="
-        + quote(pair)
-    )
-    data = _fetch_json(url)
-    if not isinstance(data, dict):
-        return "", []
-
-    response = data.get("responseData") or {}
-    translation = clean_text(response.get("translatedText"), 200)
-    if not translation or translation.upper() == word.upper():
-        translation = ""
-    if translation and "INVALID LANGUAGE PAIR" in translation.upper():
-        return "", []
-
-    alternatives: list[str] = []
-    for match in data.get("matches") or []:
-        if not isinstance(match, dict):
-            continue
-        alt = clean_text(match.get("translation"), 120)
-        if alt and alt.lower() != translation.lower() and alt not in alternatives:
-            alternatives.append(alt)
-        if len(alternatives) >= 4:
-            break
-    return translation, alternatives
-
-
-def _translate_libre(word: str, source: str, target: str) -> str:
-    if source not in {"fr", "en", "es"} or target not in {"fr", "en", "es"}:
-        return ""
-    data = _post_json(
-        "https://libretranslate.com/translate",
-        {"q": word, "source": source, "target": target, "format": "text"},
-    )
-    if not data:
-        return ""
-    return clean_text(data.get("translatedText"), 200)
-
-
-def _translate(word: str, source: str, target: str) -> tuple[str, list[str], str]:
-    translation, alternatives = _translate_mymemory(word, source, target)
-    provider = "mymemory" if translation else ""
-    if not translation:
-        translation = _translate_libre(word, source, target)
-        provider = "libretranslate" if translation else ""
-    if not translation:
-        translation, alternatives = _lookup_local(word, source, target)
-        provider = "local" if translation else ""
-    return translation, alternatives, provider
-
-
-def _english_details(word: str) -> tuple[str, list[dict]]:
-    data = _fetch_json(
-        "https://api.dictionaryapi.dev/api/v2/entries/en/" + quote(word.lower())
-    )
-    if not isinstance(data, list) or not data:
-        return "", []
-
-    entry = data[0] if isinstance(data[0], dict) else {}
+    entry = entries[0]
     phonetic = clean_text(entry.get("phonetic"), 40)
+    if not phonetic:
+        for item in entry.get("phonetics") or []:
+            if isinstance(item, dict) and item.get("text"):
+                phonetic = clean_text(item["text"], 40)
+                break
+
     meanings_out: list[dict] = []
+    synonyms: list[str] = []
 
     for meaning in entry.get("meanings") or []:
         if not isinstance(meaning, dict):
             continue
         part = clean_text(meaning.get("partOfSpeech"), 40)
-        defs: list[str] = []
+        defs: list[dict] = []
         for definition in meaning.get("definitions") or []:
             if not isinstance(definition, dict):
                 continue
-            text = clean_text(definition.get("definition"), 280)
-            if text:
-                defs.append(text)
-            if len(defs) >= 2:
+            text = clean_text(definition.get("definition"), 400)
+            if not text:
+                continue
+            example = clean_text(definition.get("example"), 200)
+            defs.append({"text": text, "example": example})
+            for syn in definition.get("synonyms") or []:
+                syn_clean = clean_text(syn, 60)
+                if syn_clean and syn_clean not in synonyms:
+                    synonyms.append(syn_clean)
+            if len(defs) >= 4:
                 break
         if defs:
             meanings_out.append({"partOfSpeech": part, "definitions": defs})
-        if len(meanings_out) >= 3:
+        if len(meanings_out) >= 5:
             break
 
-    return phonetic, meanings_out
+    return phonetic, meanings_out, synonyms[:8]
 
 
-def lookup(word: str, source_lang: str | None = None, target_lang: str | None = None) -> dict:
+def _lookup_api(word: str, lang: str) -> tuple[str, list[dict], list[str], str]:
+    if lang not in _API_LANGS:
+        return "", [], [], ""
+
+    url = f"https://api.dictionaryapi.dev/api/v2/entries/{lang}/{quote(word.lower())}"
+    data = _fetch_json(url)
+    if not isinstance(data, list):
+        return "", [], [], ""
+
+    phonetic, meanings, synonyms = _parse_api_entry(data)
+    if meanings:
+        return phonetic, meanings, synonyms, "dictionaryapi"
+    return "", [], [], ""
+
+
+def _lookup_local(word: str, lang: str) -> tuple[str, list[dict], list[str]]:
+    key = _normalize_key(word)
+    entry = LOCAL_ENTRIES.get((lang, key))
+    if not entry:
+        return "", [], []
+
+    phonetic = clean_text(entry.get("phonetic"), 40)
+    meanings = entry.get("meanings") or []
+    synonyms = entry.get("synonyms") or []
+    return phonetic, meanings, synonyms
+
+
+def lookup(word: str, lang: str | None = None) -> dict:
     clean_word = clean_text(word, 80).strip()
     if not clean_word:
         raise ValueError("INVALID_INPUT")
     if not _WORD_RE.match(clean_word):
         raise ValueError("INVALID_INPUT")
 
-    source = _resolve_lang(source_lang)
-    target = _resolve_lang(target_lang)
+    language = _resolve_lang(lang)
+    phonetic, meanings, synonyms, provider = _lookup_api(clean_word, language)
 
-    if source is None:
-        source = _detect_source_lang(clean_word)
-    if target is None:
-        target = _default_target(source)
-    if source == target:
-        raise ValueError("INVALID_LANG")
+    if not meanings:
+        phonetic, meanings, synonyms = _lookup_local(clean_word, language)
+        provider = "local" if meanings else ""
 
-    translation, alternatives, provider = _translate(clean_word, source, target)
-
-    phonetic = ""
-    meanings: list[dict] = []
-    if source == "en":
-        phonetic, meanings = _english_details(clean_word)
-
-    if not translation:
+    if not meanings:
         raise ValueError("NOT_FOUND")
 
     return {
         "ok": True,
         "query": clean_word,
-        "sourceLang": source,
-        "targetLang": target,
-        "sourceLabel": LANGUAGES[source]["label"],
-        "targetLabel": LANGUAGES[target]["label"],
-        "translation": translation,
+        "word": clean_word,
+        "lang": language,
+        "langLabel": LANGUAGES[language]["label"],
         "phonetic": phonetic,
         "meanings": meanings,
-        "alternatives": alternatives,
+        "synonyms": synonyms,
         "provider": provider,
     }

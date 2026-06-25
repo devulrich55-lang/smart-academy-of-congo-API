@@ -831,14 +831,27 @@ def dictionary_languages_route():
     return {"languages": dictionary_service.list_languages()}
 
 
+@router.get("/dictionary/lookup")
+def dictionary_lookup_route(
+    q: str = Query(..., min_length=1, max_length=80),
+    lang: str = Query("fr", max_length=8),
+):
+    try:
+        return dictionary_service.lookup(q, lang=lang)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
 @router.get("/dictionary/translate")
 def translate_dictionary_route(
     q: str = Query(..., min_length=1, max_length=80),
-    source: str = Query("auto", max_length=8),
+    source: str = Query("fr", max_length=8),
     target: str = Query("auto", max_length=8),
 ):
+    """Rétrocompatibilité — redirige vers la recherche de définition."""
+    del target
     try:
-        return dictionary_service.lookup(q, source_lang=source, target_lang=target)
+        return dictionary_service.lookup(q, lang=source)
     except ValueError as e:
         _handle_platform_error(e)
 
