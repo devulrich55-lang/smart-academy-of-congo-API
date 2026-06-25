@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, home_news_service, library_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, dictionary_service, home_news_service, library_service, meeting_service, platform_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -824,6 +824,14 @@ def delete_home_news_route(
 @router.get("/library")
 def list_library_public():
     return {"items": library_service.list_public_books()}
+
+
+@router.get("/dictionary/translate")
+def translate_dictionary_route(q: str = Query(..., min_length=1, max_length=80)):
+    try:
+        return dictionary_service.lookup(q)
+    except ValueError as e:
+        _handle_platform_error(e)
 
 
 @router.get("/library/manage")
