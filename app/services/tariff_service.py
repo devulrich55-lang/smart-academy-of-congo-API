@@ -396,6 +396,30 @@ DEFAULT_ACADEMIC_TRIMESTRE = 150
 ACADEMIC_FEE_MIN = 1
 ACADEMIC_FEE_MAX = 50000
 
+FEE_CATEGORY_DEFS = [
+    {"key": "frais_academiques", "label": "Frais académiques", "term": "Année académique", "defaultAmount": 150},
+    {"key": "enrolement", "label": "Frais d'enrôlement", "term": "Année académique", "defaultAmount": 80},
+    {"key": "reinscription", "label": "Frais de réinscription", "term": "Année académique", "defaultAmount": 60},
+    {"key": "minerval", "label": "Minerval", "term": "Année académique", "defaultAmount": 500},
+    {"key": "inscription_univ", "label": "Inscription universitaire", "term": "Année académique", "defaultAmount": 50},
+    {"key": "bibliotheque", "label": "Bibliothèque", "term": "Année académique", "defaultAmount": 30},
+    {"key": "laboratoire", "label": "Laboratoire", "term": "Année académique", "defaultAmount": 20},
+]
+
+
+def _normalize_category_amount(val, fallback: float) -> float:
+    if val is None or val == "":
+        return 0.0
+    try:
+        n = float(val)
+    except (TypeError, ValueError):
+        return fallback
+    if n == 0:
+        return 0.0
+    if ACADEMIC_FEE_MIN <= n <= ACADEMIC_FEE_MAX:
+        return round(n, 2)
+    return fallback
+
 
 def normalize_academic_fees_entry(raw: dict | None) -> dict:
     data = raw if isinstance(raw, dict) else {}
@@ -411,7 +435,28 @@ def normalize_academic_fees_entry(raw: dict | None) -> dict:
         raise ValueError("INVALID_ACADEMIC_FEE_AMOUNT")
     amount = round(amount, 2)
     entry = {"amount": amount, "currency": "USD"}
-    return {"trimestre": entry, "t1": entry, "t2": entry, "t3": entry}
+    src_cats = data.get("categories") if isinstance(data.get("categories"), dict) else {}
+    categories = {}
+    for defn in FEE_CATEGORY_DEFS:
+        key = defn["key"]
+        cat_entry = src_cats.get(key) if isinstance(src_cats.get(key), dict) else {}
+        cat_amount = _normalize_category_amount(
+            cat_entry.get("amount"),
+            defn["defaultAmount"] if src_cats else (amount if key in ("minerval", "frais_academiques") else defn["defaultAmount"]),
+        )
+        categories[key] = {
+            "amount": cat_amount,
+            "currency": "USD",
+            "label": defn["label"],
+        }
+    return {
+        "trimestre": entry,
+        "t1": entry,
+        "t2": entry,
+        "t3": entry,
+        "categories": categories,
+        "useCategories": bool(src_cats) or "categories" in data,
+    }
 
 
 def validate_academic_fees_payload(body: dict) -> dict:
@@ -447,12 +492,35 @@ def build_university_fees_for_student(
             "status": "Payé" if paid_inscription else "En attente",
             "date": paid_date if paid_inscription else "—",
             "source": "platform_inscription",
+            "feeKey": "inscription",
         }
     ]
-    for key, label, term, status, date in (
-        ("t1", "Frais académiques T1", "Trimestre 1", "Payé", f"{year}-10-12"),
-        ("t2", "Frais académiques T2", "Trimestre 2", "Payé", f"{year + 1}-01-20"),
-        ("t3", "Frais académiques T3", "Trimestre 3", "En attente", "—"),
+    categories = academic_fees.get("categories") if isinstance(academic_fees.get("categories"), dict) else {}
+    if categories and academic_fees.get("useCategories", True):
+        for defn in FEE_CATEGORY_DEFS:
+            cat = categories.get(defn["key"]) or {}
+            amt = float(cat.get("amount") or 0)
+            if amt <= 0:
+                continue
+            rows.append(
+                {
+                    "label": cat.get("label") or defn["label"],
+                    "term": defn["term"],
+                    "amount": round(amt, 2),
+                    "amountCdf": round(amt * cdf_per_usd),
+                    "currency": "USD",
+                    "status": "En attente",
+                    "date": "—",
+                    "source": "campus_academic",
+                    "feeKey": defn["key"],
+                    "categoryKey": defn["key"],
+                }
+            )
+        return rows
+    for key, label, term in (
+        ("t1", "Frais académiques T1", "Trimestre 1"),
+        ("t2", "Frais académiques T2", "Trimestre 2"),
+        ("t3", "Frais académiques T3", "Trimestre 3"),
     ):
         amt = float(academic_fees.get(key, academic_fees["trimestre"])["amount"])
         rows.append(
@@ -462,9 +530,10 @@ def build_university_fees_for_student(
                 "amount": amt,
                 "amountCdf": round(amt * cdf_per_usd),
                 "currency": "USD",
-                "status": status,
-                "date": date,
+                "status": "En attente",
+                "date": "—",
                 "source": "campus_academic",
+                "feeKey": key,
             }
         )
     return rows

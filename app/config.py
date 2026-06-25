@@ -90,6 +90,7 @@ class Settings:
     cross_origin_auth: bool = os.getenv("CROSS_ORIGIN_AUTH", "false").lower() == "true"
     api_page_default: int = int(os.getenv("API_PAGE_DEFAULT", "50"))
     api_page_max: int = int(os.getenv("API_PAGE_MAX", "200"))
+    pons_api_secret: str = os.getenv("PONS_API_SECRET", "").strip()
 
     @property
     def use_mysql(self) -> bool:

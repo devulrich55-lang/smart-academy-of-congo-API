@@ -5,6 +5,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from app.config import settings
 from app.utils.sanitize import clean_text
 
 _WORD_RE = re.compile(r"^[\w' -]{1,80}$", re.UNICODE)
@@ -24,6 +25,12 @@ _WIKI_SITE = {
     "es": ("es", "es"),
     "ln": ("fr", "ln"),
     "lua": ("fr", "lua"),
+}
+
+_PONS_LANG = {
+    "fr": ("fren", "fr"),
+    "en": ("fren", "en"),
+    "es": ("esfr", "es"),
 }
 
 LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
@@ -88,13 +95,109 @@ def list_languages() -> list[dict]:
     return list(LANGUAGES.values())
 
 
-def _fetch_json(url: str, timeout: float = 12.0) -> dict | list | None:
-    req = Request(url, headers={"User-Agent": _WIKI_UA, "Accept": "application/json"})
+def _fetch_json(url: str, timeout: float = 12.0, headers: dict | None = None) -> dict | list | None:
+    base_headers = {"User-Agent": _WIKI_UA, "Accept": "application/json"}
+    if headers:
+        base_headers.update(headers)
+    req = Request(url, headers=base_headers)
     try:
         with urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError):
         return None
+
+
+def _strip_html(text: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", text or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return clean_text(text, 500)
+
+
+def _parse_pons_response(data: list | dict, source_lang: str) -> tuple[str, list[dict], list[str]]:
+    blocks = data if isinstance(data, list) else []
+    meanings_out: list[dict] = []
+    synonyms: list[str] = []
+    phonetic = ""
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("lang") and block.get("lang") != source_lang:
+            continue
+        for hit in block.get("hits") or []:
+            if not isinstance(hit, dict):
+                continue
+            for rom in hit.get("roms") or []:
+                if not isinstance(rom, dict):
+                    continue
+                part = _strip_html(rom.get("wordclass") or "définition")
+                full = rom.get("headword_full") or ""
+                phon_match = re.search(r"\[([^\]]+)\]", full)
+                if phon_match and not phonetic:
+                    phonetic = clean_text(phon_match.group(1), 40)
+                defs: list[dict] = []
+                for arab in rom.get("arabs") or []:
+                    if not isinstance(arab, dict):
+                        continue
+                    header = _strip_html(arab.get("header") or "")
+                    for tr in arab.get("translations") or []:
+                        if not isinstance(tr, dict):
+                            continue
+                        target = _strip_html(tr.get("target") or "")
+                        source = _strip_html(tr.get("source") or "")
+                        text = header or source or target
+                        if target and header:
+                            text = header
+                            example = target
+                        elif target:
+                            text = target
+                            example = ""
+                        else:
+                            example = ""
+                        if text:
+                            defs.append({"text": text, "example": example})
+                        if len(defs) >= 6:
+                            break
+                    if len(defs) >= 6:
+                        break
+                if defs:
+                    meanings_out.append({"partOfSpeech": part, "definitions": defs})
+                if len(meanings_out) >= 5:
+                    break
+            if len(meanings_out) >= 5:
+                break
+        if meanings_out:
+            break
+
+    return phonetic, meanings_out, synonyms[:8]
+
+
+def _lookup_pons(word: str, lang: str) -> tuple[str, list[dict], list[str], str]:
+    secret = settings.pons_api_secret
+    if not secret or lang not in _PONS_LANG:
+        return "", [], [], ""
+
+    pair, source_lang = _PONS_LANG[lang]
+    url = (
+        "https://api.pons.com/v1/dictionary?q="
+        + quote(word)
+        + f"&l={pair}&in={source_lang}&ref=true&language={source_lang}"
+    )
+    data = _fetch_json(url, headers={"X-Secret": secret})
+    phonetic, meanings, synonyms = _parse_pons_response(data or [], source_lang)
+    if meanings:
+        return phonetic, meanings, synonyms, "pons"
+
+    url_broad = (
+        "https://api.pons.com/v1/dictionary?q="
+        + quote(word)
+        + f"&l={pair}&ref=true&language={source_lang}"
+    )
+    data = _fetch_json(url_broad, headers={"X-Secret": secret})
+    phonetic, meanings, synonyms = _parse_pons_response(data or [], source_lang)
+    if meanings:
+        return phonetic, meanings, synonyms, "pons"
+    return "", [], [], ""
 
 
 def _normalize_key(word: str) -> str:
@@ -312,15 +415,13 @@ def lookup(word: str, lang: str | None = None) -> dict:
     provider = ""
 
     providers = (
+        _lookup_pons,
         _lookup_wiktionary_rest,
         _lookup_wiktionary_extract,
         _lookup_dictionaryapi,
     )
     for fn in providers:
-        if fn is _lookup_dictionaryapi:
-            phonetic, meanings, synonyms, provider = fn(clean_word, language)
-        else:
-            phonetic, meanings, synonyms, provider = fn(clean_word, language)
+        phonetic, meanings, synonyms, provider = fn(clean_word, language)
         if meanings:
             break
 

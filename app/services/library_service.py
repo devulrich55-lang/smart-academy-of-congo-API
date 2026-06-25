@@ -6,7 +6,48 @@ from app.utils.sanitize import clean_text
 
 AUTHOR_ROLE = "ministere"
 CATEGORIES = frozenset(
-    {"roman", "sciences", "langues", "methodes", "informatique", "histoire", "education", "autre"}
+    {
+        "education",
+        "pedagogie",
+        "manuel",
+        "programme",
+        "examen",
+        "methodes",
+        "memoire",
+        "mathematiques",
+        "physique",
+        "chimie",
+        "biologie",
+        "sciences",
+        "informatique",
+        "ingenierie",
+        "medecine",
+        "sante",
+        "agriculture",
+        "environnement",
+        "histoire",
+        "geographie",
+        "philosophie",
+        "droit",
+        "economie",
+        "gestion",
+        "politique",
+        "sociologie",
+        "psychologie",
+        "roman",
+        "litterature",
+        "poesie",
+        "theatre",
+        "langues",
+        "arts",
+        "musique",
+        "religion",
+        "enfants",
+        "dictionnaire",
+        "culture",
+        "developpement",
+        "autre",
+    }
 )
 LANGUAGES = frozenset({"fr", "en", "bilingue"})
 
