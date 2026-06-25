@@ -982,6 +982,72 @@ def _migrate_career_offers_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_social_posts_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS social_posts (
+                  id VARCHAR(80) PRIMARY KEY,
+                  universite VARCHAR(80) NOT NULL,
+                  author_email VARCHAR(255) NOT NULL,
+                  author_name VARCHAR(200) NULL,
+                  author_role VARCHAR(20) NULL,
+                  content TEXT NOT NULL,
+                  audience VARCHAR(20) NOT NULL DEFAULT 'campus',
+                  filiere VARCHAR(120) NULL,
+                  likes_json TEXT NULL,
+                  hidden TINYINT(1) NOT NULL DEFAULT 0,
+                  created_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_social_campus ON social_posts(universite, created_at)",
+            "CREATE INDEX idx_social_author ON social_posts(author_email, created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS social_posts (
+              id TEXT PRIMARY KEY,
+              universite TEXT NOT NULL,
+              author_email TEXT NOT NULL,
+              author_name TEXT,
+              author_role TEXT,
+              content TEXT NOT NULL,
+              audience TEXT NOT NULL DEFAULT 'campus',
+              filiere TEXT,
+              likes_json TEXT DEFAULT '[]',
+              hidden INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_social_campus ON social_posts(universite, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_social_author ON social_posts(author_email, created_at DESC)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -1009,6 +1075,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_diplomas_table(conn, "mysql")
     _migrate_platform_courses_table(conn, "mysql")
     _migrate_career_offers_table(conn, "mysql")
+    _migrate_social_posts_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -1138,6 +1205,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_diplomas_table(conn, "sqlite")
     _migrate_platform_courses_table(conn, "sqlite")
     _migrate_career_offers_table(conn, "sqlite")
+    _migrate_social_posts_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, orientation_service, platform_service, social_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -1153,6 +1153,74 @@ def update_career_application_route(
     try:
         app = career_service.update_application_status(user, app_id, body.get("status") or "")
         return {"ok": True, "application": app}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social")
+def list_social_posts(user: dict = Depends(get_current_user)):
+    try:
+        return {"posts": social_service.list_posts(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social", status_code=201)
+def create_social_post(
+    body: dict,
+    user: dict = Depends(require_roles("etudiant", "professeur", "assistant")),
+):
+    try:
+        post = social_service.create_post(user, body)
+        return {"ok": True, "post": post}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social/{post_id}/like")
+def toggle_social_like(
+    post_id: str,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        post = social_service.toggle_like(user, post_id)
+        return {"ok": True, "post": post}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.delete("/social/{post_id}")
+def delete_social_post(
+    post_id: str,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        return social_service.delete_post(user, post_id)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/social/{post_id}")
+def moderate_social_post(
+    post_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("universite", "section")),
+):
+    try:
+        post = social_service.set_hidden(user, post_id, bool(body.get("hidden")))
+        return {"ok": True, "post": post}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/orientation")
+def orientation_advice_route(
+    body: dict,
+    user: dict = Depends(require_roles("etudiant")),
+):
+    try:
+        advice = orientation_service.advise(user, body.get("interests") or "")
+        return {"ok": True, "advice": advice}
     except ValueError as e:
         _handle_platform_error(e)
 
