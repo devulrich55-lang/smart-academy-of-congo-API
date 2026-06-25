@@ -1,13 +1,14 @@
 import json
 import re
 import unicodedata
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from app.utils.sanitize import clean_text
 
 _WORD_RE = re.compile(r"^[\w' -]{1,80}$", re.UNICODE)
+_WIKI_UA = "SmartAcademyCongo/1.0 (https://smart-academy-of-congo.onrender.com; dictionnaire)"
 
 LANGUAGES = {
     "fr": {"id": "fr", "label": "Français", "native": "Français"},
@@ -17,122 +18,15 @@ LANGUAGES = {
     "lua": {"id": "lua", "label": "Tshiluba", "native": "Tshiluba"},
 }
 
-_API_LANGS = frozenset({"fr", "en", "es"})
+_WIKI_SITE = {
+    "fr": ("fr", "fr"),
+    "en": ("en", "en"),
+    "es": ("es", "es"),
+    "ln": ("fr", "ln"),
+    "lua": ("fr", "lua"),
+}
 
 LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
-    ("fr", "livre"): {
-        "phonetic": "/livʁ/",
-        "meanings": [
-            {
-                "partOfSpeech": "nom masculin",
-                "definitions": [
-                    {
-                        "text": "Ouvrage composé de feuilles imprimées ou manuscrites, réunies sous une couverture.",
-                        "example": "Un livre d'histoire.",
-                    },
-                    {
-                        "text": "Ensemble des ouvrages traitant d'une discipline.",
-                        "example": "Le livre de droit.",
-                    },
-                ],
-            }
-        ],
-        "synonyms": ["ouvrage", "volume", "manuel"],
-    },
-    ("fr", "ecole"): {
-        "phonetic": "/ekɔl/",
-        "meanings": [
-            {
-                "partOfSpeech": "nom féminin",
-                "definitions": [
-                    {
-                        "text": "Établissement où l'on dispense un enseignement organisé.",
-                        "example": "Aller à l'école.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["établissement scolaire", "institution"],
-    },
-    ("fr", "etudiant"): {
-        "phonetic": "/etydjɑ̃/",
-        "meanings": [
-            {
-                "partOfSpeech": "nom",
-                "definitions": [
-                    {
-                        "text": "Personne qui suit des études dans un établissement d'enseignement supérieur ou secondaire.",
-                        "example": "Un étudiant en médecine.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["élève", "apprenant"],
-    },
-    ("en", "book"): {
-        "phonetic": "/bʊk/",
-        "meanings": [
-            {
-                "partOfSpeech": "noun",
-                "definitions": [
-                    {
-                        "text": "A written or printed work consisting of pages bound together.",
-                        "example": "She borrowed a book from the library.",
-                    },
-                    {
-                        "text": "A set of blank sheets for writing or keeping records.",
-                        "example": "an exercise book",
-                    },
-                ],
-            }
-        ],
-        "synonyms": ["volume", "publication", "tome"],
-    },
-    ("en", "school"): {
-        "phonetic": "/skuːl/",
-        "meanings": [
-            {
-                "partOfSpeech": "noun",
-                "definitions": [
-                    {
-                        "text": "An institution for educating children or providing specialized instruction.",
-                        "example": "He walks to school every morning.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["academy", "college", "institution"],
-    },
-    ("es", "libro"): {
-        "phonetic": "/ˈliβɾo/",
-        "meanings": [
-            {
-                "partOfSpeech": "sustantivo masculino",
-                "definitions": [
-                    {
-                        "text": "Conjunto de hojas impresas o manuscritas encuadernadas.",
-                        "example": "Leí un libro de historia.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["obra", "volumen", "manual"],
-    },
-    ("es", "escuela"): {
-        "phonetic": "/esˈkwela/",
-        "meanings": [
-            {
-                "partOfSpeech": "sustantivo femenino",
-                "definitions": [
-                    {
-                        "text": "Establecimiento donde se imparte enseñanza.",
-                        "example": "Los niños van a la escuela.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["colegio", "instituto"],
-    },
     ("ln", "mbote"): {
         "phonetic": "",
         "meanings": [
@@ -140,7 +34,7 @@ LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
                 "partOfSpeech": "interjection",
                 "definitions": [
                     {
-                        "text": "Maloba ya kozwa moko to koleka na mboka. (Salutation pour dire bonjour ou bonsoir.)",
+                        "text": "Salutation : bonjour, bonsoir.",
                         "example": "Mbote mingi !",
                     }
                 ],
@@ -155,7 +49,7 @@ LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
                 "partOfSpeech": "nom",
                 "definitions": [
                     {
-                        "text": "Esika oyo bato bandakisi maboko na boyekoli.",
+                        "text": "Lieu où l'on enseigne ; école.",
                         "example": "Eteyi ya université.",
                     }
                 ],
@@ -163,46 +57,13 @@ LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
         ],
         "synonyms": ["kelasi"],
     },
-    ("ln", "ndako"): {
-        "phonetic": "",
-        "meanings": [
-            {
-                "partOfSpeech": "nom",
-                "definitions": [
-                    {
-                        "text": "Esika ya kolala to ya kofanda na libota.",
-                        "example": "Ndako ya moninga.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["ndako ya mboka"],
-    },
-    ("ln", "moninga"): {
-        "phonetic": "",
-        "meanings": [
-            {
-                "partOfSpeech": "nom",
-                "definitions": [
-                    {
-                        "text": "Moto oyo ozali na boyokani malamu na ye.",
-                        "example": "Moninga na ngai.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["ndeko"],
-    },
     ("lua", "moyo"): {
         "phonetic": "",
         "meanings": [
             {
-                "partOfSpeech": "tshibusa",
+                "partOfSpeech": "nom",
                 "definitions": [
-                    {
-                        "text": "Bukole bwa kufwala bwa muntu.",
-                        "example": "Moyo wa ngwej.",
-                    }
+                    {"text": "Vie, existence.", "example": "Moyo wa ngwej."}
                 ],
             }
         ],
@@ -212,42 +73,9 @@ LOCAL_ENTRIES: dict[tuple[str, str], dict] = {
         "phonetic": "",
         "meanings": [
             {
-                "partOfSpeech": "tshibusa",
+                "partOfSpeech": "nom",
                 "definitions": [
-                    {
-                        "text": "Muntu udi mukaji wa bungi ne wenze.",
-                        "example": "Diaku dianyi.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": ["mukaji"],
-    },
-    ("lua", "dibuku"): {
-        "phonetic": "",
-        "meanings": [
-            {
-                "partOfSpeech": "tshibusa",
-                "definitions": [
-                    {
-                        "text": "Dijadika dia makanda adibu bua kutanga.",
-                        "example": "Dibuku dia bena kudia.",
-                    }
-                ],
-            }
-        ],
-        "synonyms": [],
-    },
-    ("lua", "tshikondo"): {
-        "phonetic": "",
-        "meanings": [
-            {
-                "partOfSpeech": "tshibusa",
-                "definitions": [
-                    {
-                        "text": "Tshitupa tshia bena kuela.",
-                        "example": "Tshikondo tshia université.",
-                    }
+                    {"text": "Ami, compagnon.", "example": "Diaku dianyi."}
                 ],
             }
         ],
@@ -260,12 +88,12 @@ def list_languages() -> list[dict]:
     return list(LANGUAGES.values())
 
 
-def _fetch_json(url: str, timeout: float = 8.0) -> dict | list | None:
-    req = Request(url, headers={"User-Agent": "SmartAcademyCongo/1.0"})
+def _fetch_json(url: str, timeout: float = 12.0) -> dict | list | None:
+    req = Request(url, headers={"User-Agent": _WIKI_UA, "Accept": "application/json"})
     try:
         with urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except (URLError, TimeoutError, json.JSONDecodeError, ValueError):
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError):
         return None
 
 
@@ -284,7 +112,126 @@ def _resolve_lang(code: str | None) -> str:
     return clean
 
 
-def _parse_api_entry(entries: list) -> tuple[str, list[dict], list[str]]:
+def _strip_wiki(text: str) -> str:
+    text = re.sub(r"==+[^=]+==+", " ", text)
+    text = re.sub(r"\{\{[^}]+\}\}", " ", text)
+    text = re.sub(r"\[\[(?:[^|\]]+\|)?([^\]]+)\]\]", r"\1", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return clean_text(text, 500)
+
+
+def _parse_wiktionary_rest(data: dict, section_lang: str) -> tuple[str, list[dict], list[str]]:
+    if not isinstance(data, dict):
+        return "", [], []
+
+    blocks = data.get(section_lang)
+    if not blocks and section_lang in {"ln", "lua"}:
+        for key in ("fr", "en", "es"):
+            if data.get(key):
+                blocks = data[key]
+                break
+    if not blocks and data:
+        first_key = next(iter(data.keys()), None)
+        if first_key:
+            blocks = data.get(first_key)
+
+    if not isinstance(blocks, list):
+        return "", [], []
+
+    meanings_out: list[dict] = []
+    synonyms: list[str] = []
+
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        part = clean_text(block.get("partOfSpeech") or block.get("language"), 60)
+        defs: list[dict] = []
+        for item in block.get("definitions") or []:
+            if isinstance(item, str):
+                text = _strip_wiki(item)
+            elif isinstance(item, dict):
+                text = _strip_wiki(item.get("definition") or "")
+                examples = item.get("examples") or []
+                example = ""
+                if examples:
+                    example = _strip_wiki(
+                        examples[0] if isinstance(examples[0], str) else str(examples[0])
+                    )
+                if text:
+                    defs.append({"text": text, "example": example})
+                continue
+            else:
+                continue
+            if text:
+                defs.append({"text": text, "example": ""})
+            if len(defs) >= 5:
+                break
+        if defs:
+            meanings_out.append({"partOfSpeech": part or "définition", "definitions": defs})
+        if len(meanings_out) >= 6:
+            break
+
+    return "", meanings_out, synonyms[:8]
+
+
+def _lookup_wiktionary_rest(word: str, lang: str) -> tuple[str, list[dict], list[str], str]:
+    site_lang, section_lang = _WIKI_SITE.get(lang, ("fr", "fr"))
+    candidates = [word.strip(), word.strip().lower(), word.strip().capitalize()]
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        key = candidate.lower()
+        if not candidate or key in seen:
+            continue
+        seen.add(key)
+
+        url = (
+            f"https://{site_lang}.wiktionary.org/api/rest_v1/page/definition/"
+            + quote(candidate, safe="")
+        )
+        data = _fetch_json(url)
+        phonetic, meanings, synonyms = _parse_wiktionary_rest(data or {}, section_lang)
+        if meanings:
+            return phonetic, meanings, synonyms, "wiktionary"
+
+    return "", [], [], ""
+
+
+def _lookup_wiktionary_extract(word: str, lang: str) -> tuple[str, list[dict], list[str], str]:
+    site_lang, _ = _WIKI_SITE.get(lang, ("fr", "fr"))
+    url = (
+        f"https://{site_lang}.wiktionary.org/w/api.php?action=query&prop=extracts"
+        f"&exintro&explaintext&redirects=1&titles={quote(word)}&format=json"
+    )
+    data = _fetch_json(url)
+    if not isinstance(data, dict):
+        return "", [], [], ""
+
+    pages = (data.get("query") or {}).get("pages") or {}
+    extract = ""
+    for page in pages.values():
+        if isinstance(page, dict) and page.get("extract"):
+            extract = page["extract"]
+            break
+
+    extract = _strip_wiki(extract)
+    if len(extract) < 12:
+        return "", [], [], ""
+
+    sentences = re.split(r"(?<=[.!?])\s+", extract)
+    defs = []
+    for sentence in sentences[:5]:
+        text = _strip_wiki(sentence)
+        if len(text) > 8:
+            defs.append({"text": text, "example": ""})
+    if not defs:
+        return "", [], [], ""
+
+    return "", [{"partOfSpeech": "définition", "definitions": defs}], [], "wiktionary-extract"
+
+
+def _parse_dictionaryapi(entries: list) -> tuple[str, list[dict], list[str]]:
     if not entries or not isinstance(entries[0], dict):
         return "", [], []
 
@@ -326,16 +273,14 @@ def _parse_api_entry(entries: list) -> tuple[str, list[dict], list[str]]:
     return phonetic, meanings_out, synonyms[:8]
 
 
-def _lookup_api(word: str, lang: str) -> tuple[str, list[dict], list[str], str]:
-    if lang not in _API_LANGS:
+def _lookup_dictionaryapi(word: str, lang: str) -> tuple[str, list[dict], list[str], str]:
+    if lang not in {"en", "es"}:
         return "", [], [], ""
-
     url = f"https://api.dictionaryapi.dev/api/v2/entries/{lang}/{quote(word.lower())}"
     data = _fetch_json(url)
     if not isinstance(data, list):
         return "", [], [], ""
-
-    phonetic, meanings, synonyms = _parse_api_entry(data)
+    phonetic, meanings, synonyms = _parse_dictionaryapi(data)
     if meanings:
         return phonetic, meanings, synonyms, "dictionaryapi"
     return "", [], [], ""
@@ -346,11 +291,11 @@ def _lookup_local(word: str, lang: str) -> tuple[str, list[dict], list[str]]:
     entry = LOCAL_ENTRIES.get((lang, key))
     if not entry:
         return "", [], []
-
-    phonetic = clean_text(entry.get("phonetic"), 40)
-    meanings = entry.get("meanings") or []
-    synonyms = entry.get("synonyms") or []
-    return phonetic, meanings, synonyms
+    return (
+        clean_text(entry.get("phonetic"), 40),
+        entry.get("meanings") or [],
+        entry.get("synonyms") or [],
+    )
 
 
 def lookup(word: str, lang: str | None = None) -> dict:
@@ -361,7 +306,23 @@ def lookup(word: str, lang: str | None = None) -> dict:
         raise ValueError("INVALID_INPUT")
 
     language = _resolve_lang(lang)
-    phonetic, meanings, synonyms, provider = _lookup_api(clean_word, language)
+    phonetic = ""
+    meanings: list[dict] = []
+    synonyms: list[str] = []
+    provider = ""
+
+    providers = (
+        _lookup_wiktionary_rest,
+        _lookup_wiktionary_extract,
+        _lookup_dictionaryapi,
+    )
+    for fn in providers:
+        if fn is _lookup_dictionaryapi:
+            phonetic, meanings, synonyms, provider = fn(clean_word, language)
+        else:
+            phonetic, meanings, synonyms, provider = fn(clean_word, language)
+        if meanings:
+            break
 
     if not meanings:
         phonetic, meanings, synonyms = _lookup_local(clean_word, language)
