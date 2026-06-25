@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, platform_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -1042,6 +1042,117 @@ def enroll_course_route(
     try:
         enrollment = course_service.enroll(user, course_id)
         return {"ok": True, "enrollment": enrollment}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/careers")
+def list_careers_public(
+    scope: str | None = Query(None),
+    universite: str | None = Query(None),
+):
+    from app.utils.sanitize import clean_text
+
+    sc = clean_text(scope, 20) if scope else None
+    uni = clean_text(universite, 80) if universite else None
+    return {"items": career_service.list_public(scope=sc, universite=uni)}
+
+
+@router.get("/careers/for-student")
+def list_careers_for_student(user: dict = Depends(require_roles("etudiant"))):
+    try:
+        return {"items": career_service.list_for_student(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/careers/applications/me")
+def list_my_career_applications(user: dict = Depends(require_roles("etudiant"))):
+    try:
+        return {"applications": career_service.list_my_applications(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/careers/manage")
+def list_careers_manage(
+    user: dict = Depends(require_roles("universite", "ministere")),
+):
+    try:
+        return {"items": career_service.list_manage(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/careers/{offer_id}/applications")
+def list_career_applications_route(
+    offer_id: str,
+    user: dict = Depends(require_roles("universite", "ministere")),
+):
+    try:
+        return {"applications": career_service.list_applications_for_offer(user, offer_id)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/careers", status_code=201)
+def create_career_route(
+    body: dict,
+    user: dict = Depends(require_roles("universite", "ministere")),
+):
+    try:
+        item = career_service.create_offer(user, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/careers/{offer_id}")
+def update_career_route(
+    offer_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("universite", "ministere")),
+):
+    try:
+        item = career_service.update_offer(user, offer_id, body)
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.delete("/careers/{offer_id}")
+def delete_career_route(
+    offer_id: str,
+    user: dict = Depends(require_roles("universite", "ministere")),
+):
+    try:
+        return career_service.delete_offer(user, offer_id)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/careers/{offer_id}/apply", status_code=201)
+def apply_career_route(
+    offer_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("etudiant")),
+):
+    try:
+        app = career_service.apply(user, offer_id, body.get("message") or "")
+        return {"ok": True, "application": app}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/careers/applications/{app_id}")
+def update_career_application_route(
+    app_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("universite", "ministere")),
+):
+    try:
+        app = career_service.update_application_status(user, app_id, body.get("status") or "")
+        return {"ok": True, "application": app}
     except ValueError as e:
         _handle_platform_error(e)
 

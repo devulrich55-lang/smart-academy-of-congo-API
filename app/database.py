@@ -854,6 +854,134 @@ def _migrate_platform_courses_table(conn, backend: str) -> None:
         pass
 
 
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_career_offers_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS career_offers (
+                  id VARCHAR(80) PRIMARY KEY,
+                  scope VARCHAR(20) NOT NULL DEFAULT 'campus',
+                  offer_type VARCHAR(40) NOT NULL DEFAULT 'stage',
+                  title VARCHAR(200) NOT NULL,
+                  organization VARCHAR(200) NULL,
+                  location VARCHAR(120) NULL,
+                  description TEXT NULL,
+                  requirements TEXT NULL,
+                  filiere VARCHAR(120) NULL,
+                  niveau VARCHAR(40) NULL,
+                  universite VARCHAR(80) NOT NULL,
+                  university_name VARCHAR(200) NULL,
+                  contact_email VARCHAR(255) NULL,
+                  apply_url VARCHAR(500) NULL,
+                  deadline VARCHAR(20) NULL,
+                  published TINYINT(1) NOT NULL DEFAULT 1,
+                  author_id VARCHAR(255) NULL,
+                  author_role VARCHAR(20) NULL,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS career_applications (
+                  id VARCHAR(80) PRIMARY KEY,
+                  career_id VARCHAR(80) NOT NULL,
+                  student_email VARCHAR(255) NOT NULL,
+                  student_name VARCHAR(200) NULL,
+                  matricule VARCHAR(50) NULL,
+                  universite VARCHAR(80) NOT NULL,
+                  message TEXT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                  applied_at VARCHAR(40) NOT NULL,
+                  UNIQUE KEY uq_career_student (career_id, student_email)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_careers_scope ON career_offers(scope, published, created_at)",
+            "CREATE INDEX idx_careers_campus ON career_offers(universite, published, created_at)",
+            "CREATE INDEX idx_career_apps ON career_applications(career_id, applied_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS career_offers (
+              id TEXT PRIMARY KEY,
+              scope TEXT NOT NULL DEFAULT 'campus',
+              offer_type TEXT NOT NULL DEFAULT 'stage',
+              title TEXT NOT NULL,
+              organization TEXT,
+              location TEXT,
+              description TEXT,
+              requirements TEXT,
+              filiere TEXT,
+              niveau TEXT,
+              universite TEXT NOT NULL,
+              university_name TEXT,
+              contact_email TEXT,
+              apply_url TEXT,
+              deadline TEXT,
+              published INTEGER NOT NULL DEFAULT 1,
+              author_id TEXT,
+              author_role TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS career_applications (
+              id TEXT PRIMARY KEY,
+              career_id TEXT NOT NULL,
+              student_email TEXT NOT NULL,
+              student_name TEXT,
+              matricule TEXT,
+              universite TEXT NOT NULL,
+              message TEXT,
+              status TEXT NOT NULL DEFAULT 'pending',
+              applied_at TEXT NOT NULL,
+              UNIQUE(career_id, student_email)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_careers_scope ON career_offers(scope, published, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_careers_campus ON career_offers(universite, published, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_career_apps ON career_applications(career_id, applied_at DESC)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -880,6 +1008,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_digital_library_table(conn, "mysql")
     _migrate_diplomas_table(conn, "mysql")
     _migrate_platform_courses_table(conn, "mysql")
+    _migrate_career_offers_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -1008,6 +1137,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_digital_library_table(conn, "sqlite")
     _migrate_diplomas_table(conn, "sqlite")
     _migrate_platform_courses_table(conn, "sqlite")
+    _migrate_career_offers_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
