@@ -649,6 +649,89 @@ def _migrate_digital_library_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_diplomas_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS diplomas (
+                  id VARCHAR(80) PRIMARY KEY,
+                  student_email VARCHAR(255) NOT NULL,
+                  student_name VARCHAR(200) NOT NULL,
+                  matricule VARCHAR(50) NULL,
+                  universite VARCHAR(80) NOT NULL,
+                  university_name VARCHAR(200) NULL,
+                  filiere VARCHAR(120) NULL,
+                  niveau VARCHAR(40) NULL,
+                  diploma_type VARCHAR(40) NOT NULL,
+                  graduation_year INT NOT NULL,
+                  diploma_number VARCHAR(80) NOT NULL,
+                  verification_code VARCHAR(80) NOT NULL,
+                  hash_signature VARCHAR(128) NOT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'actif',
+                  issued_by VARCHAR(255) NOT NULL,
+                  issued_at VARCHAR(40) NOT NULL,
+                  revoked_at VARCHAR(40) NULL,
+                  revoked_by VARCHAR(255) NULL,
+                  notes VARCHAR(400) NULL,
+                  UNIQUE KEY uq_diploma_number (diploma_number)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_diplomas_campus ON diplomas(universite, issued_at)",
+            "CREATE INDEX idx_diplomas_student ON diplomas(student_email, status)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS diplomas (
+              id TEXT PRIMARY KEY,
+              student_email TEXT NOT NULL,
+              student_name TEXT NOT NULL,
+              matricule TEXT,
+              universite TEXT NOT NULL,
+              university_name TEXT,
+              filiere TEXT,
+              niveau TEXT,
+              diploma_type TEXT NOT NULL,
+              graduation_year INTEGER NOT NULL,
+              diploma_number TEXT NOT NULL UNIQUE,
+              verification_code TEXT NOT NULL,
+              hash_signature TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'actif',
+              issued_by TEXT NOT NULL,
+              issued_at TEXT NOT NULL,
+              revoked_at TEXT,
+              revoked_by TEXT,
+              notes TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_diplomas_campus ON diplomas(universite, issued_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_diplomas_student ON diplomas(student_email, status)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -673,6 +756,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_campus_academic_fees_columns(conn, "mysql")
     _migrate_academic_payments_table(conn, "mysql")
     _migrate_digital_library_table(conn, "mysql")
+    _migrate_diplomas_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -799,6 +883,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_campus_academic_fees_columns(conn, "sqlite")
     _migrate_academic_payments_table(conn, "sqlite")
     _migrate_digital_library_table(conn, "sqlite")
+    _migrate_diplomas_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

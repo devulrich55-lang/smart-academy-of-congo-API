@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, dictionary_service, home_news_service, library_service, meeting_service, platform_service
+from app.services import ai_correction_service, audit_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, platform_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -908,6 +908,60 @@ async def upload_library_file_route(
         "fileName": primary["name"],
         "mediaType": primary["mediaType"],
     }
+
+
+@router.get("/diplomas/manage")
+def list_diplomas_manage(user: dict = Depends(require_roles("universite"))):
+    try:
+        return {"diplomas": diploma_service.list_campus_diplomas(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/diplomas/me")
+def list_my_diplomas(user: dict = Depends(require_roles("etudiant"))):
+    try:
+        return {"diplomas": diploma_service.list_student_diplomas(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/diplomas/issue", status_code=201)
+def issue_diploma_route(body: dict, user: dict = Depends(require_roles("universite"))):
+    try:
+        item = diploma_service.issue_diploma(user, body)
+        return {"ok": True, "diploma": item}
+    except ValueError as e:
+        _handle_diploma_error(e)
+
+
+@router.patch("/diplomas/{diploma_id}")
+def revoke_diploma_route(
+    diploma_id: str, user: dict = Depends(require_roles("universite"))
+):
+    try:
+        item = diploma_service.revoke_diploma(user, diploma_id)
+        return {"ok": True, "diploma": item}
+    except ValueError as e:
+        _handle_diploma_error(e)
+
+
+@router.post("/diplomas/verify")
+@limiter.limit("30/15minutes")
+def verify_diploma_route(request: Request, body: dict):
+    code = body.get("verificationCode") or body.get("code") or ""
+    number = body.get("diplomaNumber") or body.get("number") or ""
+    return diploma_service.verify_diploma_public(code, number)
+
+
+def _handle_diploma_error(exc: ValueError) -> None:
+    code = str(exc)
+    if code == "STUDENT_NOT_FOUND":
+        raise HTTPException(
+            status_code=404,
+            detail={"error": code, "message": "Étudiant introuvable sur votre campus."},
+        )
+    _handle_platform_error(exc)
 
 
 def _handle_platform_error(exc: ValueError) -> None:
