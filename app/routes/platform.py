@@ -451,33 +451,6 @@ def meeting_qa(meeting_id: str, body: dict, user: dict = Depends(get_current_use
         _handle_platform_error(e)
 
 
-@router.get("/social")
-def list_social(user: dict = Depends(get_current_user)):
-    return {
-        "posts": platform_service.list_social_posts(
-            user["universite"], user.get("filiere")
-        )
-    }
-
-
-@router.post("/social")
-def create_social(body: dict, request: Request, user: dict = Depends(get_current_user)):
-    try:
-        post = platform_service.create_social_post(user, body)
-        audit_service.log_audit(request, "create_social", "social", resource_id=post.get("id"))
-        return {"post": post}
-    except ValueError as e:
-        _handle_platform_error(e)
-
-
-@router.post("/social/{post_id}/like")
-def like_social(post_id: str, user: dict = Depends(get_current_user)):
-    try:
-        return platform_service.toggle_social_like(post_id, user["email"])
-    except ValueError as e:
-        _handle_platform_error(e)
-
-
 @router.get("/diplomas/me")
 def my_diplomas(user: dict = Depends(require_roles("etudiant"))):
     return {"diplomas": platform_service.list_diplomas_for_student(user["email"])}

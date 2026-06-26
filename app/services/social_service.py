@@ -8,6 +8,7 @@ from pathlib import Path
 from app.config import settings
 from app.database import get_db
 from app.services import email_service
+from app.utils.campus_catalog import normalize_profile_campus, registered_campus, resolve_campus_id, same_campus
 from app.utils.platform_security import uid
 from app.utils.sanitize import clean_text
 
@@ -28,9 +29,43 @@ def _now() -> str:
 
 
 def _campus(actor: dict) -> str:
-    return clean_text(
-        actor.get("universite") or actor.get("codeUni") or actor.get("sigle"), 80
+    return (
+        registered_campus(actor)
+        or resolve_campus_id(
+            actor.get("universite")
+            or actor.get("universiteLocked")
+            or actor.get("codeUni")
+            or actor.get("sigle")
+        )
+        or clean_text(actor.get("universite"), 80)
     )
+
+
+def _norm_filiere(value: str | None) -> str:
+    return clean_text(value, 120).lower().strip()
+
+
+def _filiere_matches(a: str | None, b: str | None) -> bool:
+    fa, fb = _norm_filiere(a), _norm_filiere(b)
+    if not fa and not fb:
+        return True
+    if not fa or not fb:
+        return False
+    if fa == fb:
+        return True
+    return fa in fb or fb in fa
+
+
+def _get_post_row(post_id: str, campus: str):
+    row = get_db().execute(
+        "SELECT * FROM social_posts WHERE id = ?",
+        (clean_text(post_id, 80),),
+    ).fetchone()
+    if not row:
+        raise ValueError("NOT_FOUND")
+    if not same_campus(row["universite"], campus):
+        raise ValueError("NOT_FOUND")
+    return row
 
 
 def _email(actor: dict) -> str:
@@ -175,18 +210,17 @@ def _visible_for_actor(row, actor: dict) -> bool:
             if (row["author_email"] or "").lower() != em:
                 return False
     campus = _campus(actor)
-    if row["universite"] != campus:
+    if not same_campus(row["universite"], campus):
         return False
     audience = row["audience"] or "campus"
-    actor_fil = clean_text(actor.get("filiere"), 120).lower()
-    actor_niv = clean_text(actor.get("niveau"), 40).lower()
-    post_fil = (row["filiere"] or "").lower()
-    post_niv = (row["niveau"] or "").lower() if "niveau" in row.keys() else ""
-    if audience == "filiere" and post_fil and actor_fil:
-        if post_fil not in actor_fil and actor_fil not in post_fil:
-            return False
+    actor_fil = actor.get("filiere")
+    actor_niv = _norm_filiere(actor.get("niveau"))
+    post_fil = row["filiere"] or ""
+    post_niv = _norm_filiere(row["niveau"] if "niveau" in row.keys() else "")
+    if audience == "filiere" and post_fil and not _filiere_matches(post_fil, actor_fil):
+        return False
     if audience == "promotion":
-        if post_fil and actor_fil and post_fil not in actor_fil and actor_fil not in post_fil:
+        if not _filiere_matches(post_fil, actor_fil):
             return False
         if post_niv and actor_niv and post_niv != actor_niv:
             return False
@@ -273,10 +307,8 @@ def list_posts(actor: dict, filters: dict | None = None) -> list[dict]:
     email = _email(actor)
     rows = get_db().execute(
         """SELECT * FROM social_posts
-           WHERE universite = ?
            ORDER BY created_at DESC
-           LIMIT 300""",
-        (campus,),
+           LIMIT 500"""
     ).fetchall()
     q = clean_text(filters.get("q"), 120).lower()
     hashtag = clean_text(filters.get("hashtag"), 40).lstrip("#").lower()
@@ -299,6 +331,8 @@ def list_posts(actor: dict, filters: dict | None = None) -> list[dict]:
 
     visible = []
     for row in rows:
+        if not same_campus(row["universite"], campus):
+            continue
         if not _visible_for_actor(row, actor):
             continue
         if q:
@@ -353,9 +387,9 @@ def list_events(actor: dict) -> list[dict]:
     now = _now()
     rows = get_db().execute(
         """SELECT * FROM social_posts
-           WHERE universite = ? AND event_at IS NOT NULL AND event_at >= ?
-           ORDER BY event_at ASC LIMIT 30""",
-        (campus, now),
+           WHERE event_at IS NOT NULL AND event_at >= ?
+           ORDER BY event_at ASC LIMIT 60""",
+        (now,),
     ).fetchall()
     email = _email(actor)
     out = []
@@ -369,11 +403,12 @@ def list_events(actor: dict) -> list[dict]:
 def trending_hashtags(actor: dict) -> list[dict]:
     campus = _campus(actor)
     rows = get_db().execute(
-        "SELECT hashtags_json FROM social_posts WHERE universite = ? ORDER BY created_at DESC LIMIT 150",
-        (campus,),
+        "SELECT universite, hashtags_json FROM social_posts ORDER BY created_at DESC LIMIT 300"
     ).fetchall()
     counts: dict[str, int] = {}
     for row in rows:
+        if not same_campus(row["universite"], campus):
+            continue
         for tag in _json_load(row["hashtags_json"] if "hashtags_json" in row.keys() else None, []):
             key = str(tag).lower()
             counts[key] = counts.get(key, 0) + 1
@@ -395,10 +430,13 @@ def create_post(actor: dict, data: dict) -> dict:
         raise ValueError("INVALID_INPUT")
     if post_type == "text" and len(content) < 2:
         raise ValueError("INVALID_INPUT")
-    audience = clean_text(data.get("audience"), 20) or "campus"
+    author_filiere = clean_text(actor.get("filiere"), 120)
+    audience = clean_text(data.get("audience"), 20) or (
+        "filiere" if author_filiere else "campus"
+    )
     if audience not in AUDIENCES:
         audience = "campus"
-    filiere = clean_text(actor.get("filiere"), 120) if audience in ("filiere", "promotion") else ""
+    filiere = author_filiere
     niveau = clean_text(actor.get("niveau"), 40) if audience == "promotion" else ""
     hashtags = _extract_hashtags(content, data.get("hashtags") or [])
     pinned = bool(data.get("pinned")) and actor.get("role") in MODERATE_ROLES
@@ -471,11 +509,8 @@ def toggle_reaction(actor: dict, post_id: str, reaction: str) -> dict:
     email = _email(actor)
     if not email:
         raise ValueError("INVALID_INPUT")
-    row = get_db().execute(
-        "SELECT * FROM social_posts WHERE id = ? AND universite = ?",
-        (clean_text(post_id, 80), campus),
-    ).fetchone()
-    if not row or row["hidden"]:
+    row = _get_post_row(post_id, campus)
+    if row["hidden"]:
         raise ValueError("NOT_FOUND")
     if not _visible_for_actor(row, actor):
         raise ValueError("FORBIDDEN")
@@ -519,11 +554,8 @@ def toggle_like(actor: dict, post_id: str) -> dict:
 
 def list_comments(actor: dict, post_id: str) -> list[dict]:
     campus = _campus(actor)
-    row = get_db().execute(
-        "SELECT * FROM social_posts WHERE id = ? AND universite = ?",
-        (clean_text(post_id, 80), campus),
-    ).fetchone()
-    if not row or not _visible_for_actor(row, actor):
+    row = _get_post_row(post_id, campus)
+    if not _visible_for_actor(row, actor):
         raise ValueError("NOT_FOUND")
     rows = get_db().execute(
         """SELECT * FROM social_comments WHERE post_id = ?
@@ -550,11 +582,8 @@ def add_comment(actor: dict, post_id: str, content: str) -> dict:
     text = clean_text(content, 1000)
     if len(text) < 1:
         raise ValueError("INVALID_INPUT")
-    row = get_db().execute(
-        "SELECT * FROM social_posts WHERE id = ? AND universite = ?",
-        (clean_text(post_id, 80), campus),
-    ).fetchone()
-    if not row or row["hidden"] or not _visible_for_actor(row, actor):
+    row = _get_post_row(post_id, campus)
+    if row["hidden"] or not _visible_for_actor(row, actor):
         raise ValueError("NOT_FOUND")
     cid = uid("scmt")
     now = _now()
@@ -594,12 +623,7 @@ def set_pinned(actor: dict, post_id: str, pinned: bool) -> dict:
     if actor.get("role") not in MODERATE_ROLES.union({"universite"}):
         raise ValueError("FORBIDDEN")
     campus = _campus(actor)
-    row = get_db().execute(
-        "SELECT * FROM social_posts WHERE id = ? AND universite = ?",
-        (clean_text(post_id, 80), campus),
-    ).fetchone()
-    if not row:
-        raise ValueError("NOT_FOUND")
+    row = _get_post_row(post_id, campus)
     get_db().execute(
         "UPDATE social_posts SET pinned = ? WHERE id = ?",
         (1 if pinned else 0, row["id"]),
@@ -612,12 +636,7 @@ def set_pinned(actor: dict, post_id: str, pinned: bool) -> dict:
 def delete_post(actor: dict, post_id: str) -> dict:
     campus = _campus(actor)
     email = _email(actor)
-    row = get_db().execute(
-        "SELECT * FROM social_posts WHERE id = ? AND universite = ?",
-        (clean_text(post_id, 80), campus),
-    ).fetchone()
-    if not row:
-        raise ValueError("NOT_FOUND")
+    row = _get_post_row(post_id, campus)
     role = actor.get("role")
     if (row["author_email"] or "").lower() != email and role not in MODERATE_ROLES.union({"universite"}):
         raise ValueError("FORBIDDEN")
@@ -631,12 +650,7 @@ def set_hidden(actor: dict, post_id: str, hidden: bool) -> dict:
     if actor.get("role") not in MODERATE_ROLES.union({"universite"}):
         raise ValueError("FORBIDDEN")
     campus = _campus(actor)
-    row = get_db().execute(
-        "SELECT * FROM social_posts WHERE id = ? AND universite = ?",
-        (clean_text(post_id, 80), campus),
-    ).fetchone()
-    if not row:
-        raise ValueError("NOT_FOUND")
+    row = _get_post_row(post_id, campus)
     get_db().execute(
         "UPDATE social_posts SET hidden = ? WHERE id = ?",
         (1 if hidden else 0, row["id"]),
@@ -764,10 +778,10 @@ def send_message(actor: dict, data: dict) -> dict:
     if to_email == email:
         raise ValueError("INVALID_INPUT")
     peer = get_db().execute(
-        "SELECT email, prenom, nom, role FROM users WHERE email = ? AND universite = ?",
-        (to_email, campus),
+        "SELECT email, prenom, nom, role, universite FROM users WHERE email = ?",
+        (to_email,),
     ).fetchone()
-    if not peer or peer["role"] != "etudiant":
+    if not peer or peer["role"] != "etudiant" or not same_campus(peer["universite"], campus):
         raise ValueError("NOT_FOUND")
     to_name = " ".join(p for p in [peer["prenom"], peer["nom"]] if p).strip() or to_email
     mid = uid("smsg")
