@@ -1443,7 +1443,10 @@ def _handle_platform_error(exc: ValueError) -> None:
             status_code=403, detail={"error": code, "message": "Accès refusé."}
         )
     if code == "NOT_FOUND":
-        raise HTTPException(status_code=404, detail={"error": code})
+        raise HTTPException(
+            status_code=404,
+            detail={"error": code, "message": "Élément introuvable ou accès refusé."},
+        )
     if code == "INVALID_INPUT":
         raise HTTPException(status_code=400, detail={"error": code})
     if code == "DM_DISABLED":

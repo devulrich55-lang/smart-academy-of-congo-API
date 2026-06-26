@@ -56,16 +56,50 @@ def _filiere_matches(a: str | None, b: str | None) -> bool:
     return fa in fb or fb in fa
 
 
-def _get_post_row(post_id: str, campus: str):
+def _normalize_actor(actor: dict) -> dict:
+    if not actor:
+        return {}
+    out = dict(actor)
+    return normalize_profile_campus(out) or out
+
+
+def _is_post_author(row, actor: dict) -> bool:
+    return (row["author_email"] or "").lower() == _email(actor)
+
+
+def _post_campus_matches(row, actor: dict) -> bool:
+    actor = _normalize_actor(actor)
+    post_uni = row["universite"] or ""
+    if not post_uni:
+        return False
+    if same_campus(post_uni, _campus(actor)):
+        return True
+    for key in ("universite", "universiteLocked", "sigle", "codeUni", "nomUniversite", "nom_universite"):
+        raw = actor.get(key)
+        if raw and same_campus(post_uni, str(raw)):
+            return True
+    return False
+
+
+def _require_post_interaction(row, actor: dict) -> None:
+    if _is_post_author(row, actor):
+        return
+    if row["hidden"]:
+        raise ValueError("NOT_FOUND")
+    if not _visible_for_actor(row, actor):
+        raise ValueError("NOT_FOUND")
+
+
+def _get_post_row(post_id: str, actor: dict):
     row = get_db().execute(
         "SELECT * FROM social_posts WHERE id = ?",
         (clean_text(post_id, 80),),
     ).fetchone()
     if not row:
         raise ValueError("NOT_FOUND")
-    if not same_campus(row["universite"], campus):
-        raise ValueError("NOT_FOUND")
-    return row
+    if _is_post_author(row, actor) or _post_campus_matches(row, actor):
+        return row
+    raise ValueError("NOT_FOUND")
 
 
 def _email(actor: dict) -> str:
@@ -220,7 +254,7 @@ def _visible_for_actor(row, actor: dict) -> bool:
     if audience == "filiere" and post_fil and not _filiere_matches(post_fil, actor_fil):
         return False
     if audience == "promotion":
-        if not _filiere_matches(post_fil, actor_fil):
+        if post_fil and not _filiere_matches(post_fil, actor_fil):
             return False
         if post_niv and actor_niv and post_niv != actor_niv:
             return False
@@ -505,15 +539,13 @@ def toggle_reaction(actor: dict, post_id: str, reaction: str) -> dict:
     reaction = clean_text(reaction, 20) or "like"
     if reaction not in REACTIONS:
         reaction = "like"
+    actor = _normalize_actor(actor)
     campus = _campus(actor)
     email = _email(actor)
     if not email:
         raise ValueError("INVALID_INPUT")
-    row = _get_post_row(post_id, campus)
-    if row["hidden"]:
-        raise ValueError("NOT_FOUND")
-    if not _visible_for_actor(row, actor):
-        raise ValueError("FORBIDDEN")
+    row = _get_post_row(post_id, actor)
+    _require_post_interaction(row, actor)
     reactions = _parse_reactions(
         row["reactions_json"] if "reactions_json" in row.keys() else None,
         row["likes_json"],
@@ -553,10 +585,9 @@ def toggle_like(actor: dict, post_id: str) -> dict:
 
 
 def list_comments(actor: dict, post_id: str) -> list[dict]:
-    campus = _campus(actor)
-    row = _get_post_row(post_id, campus)
-    if not _visible_for_actor(row, actor):
-        raise ValueError("NOT_FOUND")
+    actor = _normalize_actor(actor)
+    row = _get_post_row(post_id, actor)
+    _require_post_interaction(row, actor)
     rows = get_db().execute(
         """SELECT * FROM social_comments WHERE post_id = ?
            ORDER BY created_at ASC LIMIT 100""",
@@ -577,14 +608,14 @@ def list_comments(actor: dict, post_id: str) -> list[dict]:
 
 
 def add_comment(actor: dict, post_id: str, content: str) -> dict:
+    actor = _normalize_actor(actor)
     campus = _campus(actor)
     email = _email(actor)
     text = clean_text(content, 1000)
     if len(text) < 1:
         raise ValueError("INVALID_INPUT")
-    row = _get_post_row(post_id, campus)
-    if row["hidden"] or not _visible_for_actor(row, actor):
-        raise ValueError("NOT_FOUND")
+    row = _get_post_row(post_id, actor)
+    _require_post_interaction(row, actor)
     cid = uid("scmt")
     now = _now()
     get_db().execute(
@@ -622,8 +653,8 @@ def add_comment(actor: dict, post_id: str, content: str) -> dict:
 def set_pinned(actor: dict, post_id: str, pinned: bool) -> dict:
     if actor.get("role") not in MODERATE_ROLES.union({"universite"}):
         raise ValueError("FORBIDDEN")
-    campus = _campus(actor)
-    row = _get_post_row(post_id, campus)
+    actor = _normalize_actor(actor)
+    row = _get_post_row(post_id, actor)
     get_db().execute(
         "UPDATE social_posts SET pinned = ? WHERE id = ?",
         (1 if pinned else 0, row["id"]),
@@ -634,9 +665,9 @@ def set_pinned(actor: dict, post_id: str, pinned: bool) -> dict:
 
 
 def delete_post(actor: dict, post_id: str) -> dict:
-    campus = _campus(actor)
+    actor = _normalize_actor(actor)
     email = _email(actor)
-    row = _get_post_row(post_id, campus)
+    row = _get_post_row(post_id, actor)
     role = actor.get("role")
     if (row["author_email"] or "").lower() != email and role not in MODERATE_ROLES.union({"universite"}):
         raise ValueError("FORBIDDEN")
@@ -649,8 +680,8 @@ def delete_post(actor: dict, post_id: str) -> dict:
 def set_hidden(actor: dict, post_id: str, hidden: bool) -> dict:
     if actor.get("role") not in MODERATE_ROLES.union({"universite"}):
         raise ValueError("FORBIDDEN")
-    campus = _campus(actor)
-    row = _get_post_row(post_id, campus)
+    actor = _normalize_actor(actor)
+    row = _get_post_row(post_id, actor)
     get_db().execute(
         "UPDATE social_posts SET hidden = ? WHERE id = ?",
         (1 if hidden else 0, row["id"]),
