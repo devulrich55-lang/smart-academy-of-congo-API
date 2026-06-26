@@ -1126,6 +1126,102 @@ def _migrate_mobile_money_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_live_sessions_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS live_sessions (
+                  id VARCHAR(80) PRIMARY KEY,
+                  universite VARCHAR(80) NOT NULL,
+                  professor_email VARCHAR(255) NOT NULL,
+                  professor_name VARCHAR(200) NULL,
+                  title VARCHAR(200) NOT NULL,
+                  description TEXT NULL,
+                  course_code VARCHAR(40) NULL,
+                  filiere VARCHAR(120) NULL,
+                  niveau VARCHAR(40) NULL,
+                  room_name VARCHAR(80) NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+                  scheduled_at VARCHAR(40) NULL,
+                  started_at VARCHAR(40) NULL,
+                  ended_at VARCHAR(40) NULL,
+                  recording_url VARCHAR(500) NULL,
+                  transcript TEXT NULL,
+                  ai_summary TEXT NULL,
+                  ai_key_points_json TEXT NULL,
+                  documents_json TEXT NULL,
+                  attendance_json TEXT NULL,
+                  questions_json TEXT NULL,
+                  participation_report_json TEXT NULL,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_live_campus ON live_sessions(universite, updated_at)",
+            "CREATE INDEX idx_live_status ON live_sessions(status, scheduled_at)",
+            "CREATE INDEX idx_live_prof ON live_sessions(professor_email, created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS live_sessions (
+              id TEXT PRIMARY KEY,
+              universite TEXT NOT NULL,
+              professor_email TEXT NOT NULL,
+              professor_name TEXT,
+              title TEXT NOT NULL,
+              description TEXT,
+              course_code TEXT,
+              filiere TEXT,
+              niveau TEXT,
+              room_name TEXT,
+              status TEXT NOT NULL DEFAULT 'scheduled',
+              scheduled_at TEXT,
+              started_at TEXT,
+              ended_at TEXT,
+              recording_url TEXT,
+              transcript TEXT,
+              ai_summary TEXT,
+              ai_key_points_json TEXT,
+              documents_json TEXT,
+              attendance_json TEXT,
+              questions_json TEXT,
+              participation_report_json TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_campus ON live_sessions(universite, updated_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_status ON live_sessions(status, scheduled_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_prof ON live_sessions(professor_email, created_at DESC)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -1155,6 +1251,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_career_offers_table(conn, "mysql")
     _migrate_social_posts_table(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
+    _migrate_live_sessions_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -1286,6 +1383,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_career_offers_table(conn, "sqlite")
     _migrate_social_posts_table(conn, "sqlite")
     _migrate_mobile_money_table(conn, "sqlite")
+    _migrate_live_sessions_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

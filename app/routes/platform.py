@@ -6,7 +6,7 @@ import uuid
 from app.config import settings
 from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
-from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, meeting_service, orientation_service, platform_service, social_service
+from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, live_service, meeting_service, orientation_service, platform_service, social_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
@@ -1225,6 +1225,82 @@ def orientation_advice_route(
         _handle_platform_error(e)
 
 
+@router.get("/live/sessions")
+def list_live_sessions(user: dict = Depends(get_current_user)):
+    try:
+        return {"sessions": live_service.list_sessions(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/live/sessions", status_code=201)
+def create_live_session(
+    body: dict,
+    user: dict = Depends(require_roles("professeur", "assistant", "section", "universite", "ministere")),
+):
+    try:
+        session = live_service.create_session(user, body)
+        return {"ok": True, "session": session}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/live/sessions/{session_id}/start")
+def start_live_session(
+    session_id: str,
+    user: dict = Depends(require_roles("professeur", "assistant", "section", "universite", "ministere")),
+):
+    try:
+        session = live_service.start_session(user, session_id)
+        return {"ok": True, "session": session}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/live/sessions/{session_id}/end")
+def end_live_session(
+    session_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("professeur", "assistant", "section", "universite", "ministere")),
+):
+    try:
+        session = live_service.end_session(user, session_id, body)
+        return {"ok": True, "session": session}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/live/sessions/{session_id}/join")
+def join_live_session(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        session = live_service.join_session(user, session_id)
+        return {"ok": True, "session": session}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/live/sessions/{session_id}/recording")
+async def upload_live_recording(
+    session_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_roles("professeur", "assistant", "section", "universite", "ministere")),
+):
+    try:
+        content = await file.read()
+        result = live_service.save_recording(
+            user,
+            session_id,
+            file.filename or "recording.webm",
+            content,
+        )
+        return result
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
 def clean_text_universite(val: str | None) -> str | None:
     from app.utils.sanitize import clean_text
 
@@ -1243,6 +1319,11 @@ def _handle_platform_error(exc: ValueError) -> None:
         raise HTTPException(status_code=404, detail={"error": code})
     if code == "INVALID_INPUT":
         raise HTTPException(status_code=400, detail={"error": code})
+    if code == "FILE_TOO_LARGE":
+        raise HTTPException(
+            status_code=413,
+            detail={"error": code, "message": "Enregistrement max 100 Mo"},
+        )
     if code == "INVALID_LANG":
         raise HTTPException(
             status_code=400,
