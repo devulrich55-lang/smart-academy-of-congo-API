@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.deps import get_current_user, require_roles
-from app.services import payment_service
+from app.deps import get_current_user, get_optional_user, require_roles
+from app.rate_limit import limiter
+from app.services import mobile_money_service, payment_service
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -27,6 +28,16 @@ ERROR_MAP = {
     "SLOT_ALREADY_APPROVED": (409, "Ce volet est déjà approuvé"),
     "UNIVERSITY_NOT_FOUND": (404, "Université introuvable"),
     "ACCOUNT_SUFFIX_MISMATCH": (400, "Les derniers chiffres du compte ne correspondent pas"),
+    "INVALID_PROVIDER": (400, "Opérateur mobile invalide"),
+    "INVALID_PHONE": (400, "Numéro mobile congolais invalide"),
+    "INVALID_PIN": (400, "Code PIN invalide"),
+    "MOBILE_TX_REQUIRED": (400, "Transaction Mobile Money requise"),
+    "PAYMENT_NOT_COMPLETED": (400, "Paiement mobile non confirmé"),
+    "INVALID_PURPOSE": (400, "Type de paiement invalide"),
+    "PIN_NOT_REQUIRED": (400, "Confirmation PIN non requise pour ce mode"),
+    "PROVIDER_OFFLINE": (503, "Service Mobile Money temporairement indisponible"),
+    "PROVIDER_DECLINED": (402, "Paiement refusé par l'opérateur"),
+    "INVALID_WEBHOOK": (400, "Webhook invalide"),
 }
 
 
@@ -110,5 +121,62 @@ def update_payment_route(
     try:
         payment = payment_service.update_payment_status(user, payment_id, body)
         return {"ok": True, "payment": payment}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/mobile/initiate", status_code=201)
+@limiter.limit("15/minute")
+def mobile_initiate_route(
+    request: Request,
+    body: dict,
+    user: dict | None = Depends(get_optional_user),
+):
+    try:
+        tx = mobile_money_service.initiate(body, user)
+        return {"ok": True, "transaction": tx}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/mobile/{tx_id}")
+def mobile_status_route(
+    tx_id: str,
+    user: dict | None = Depends(get_optional_user),
+):
+    try:
+        return {"ok": True, "transaction": mobile_money_service.get_status(tx_id, user)}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/mobile/{tx_id}/confirm")
+@limiter.limit("20/minute")
+def mobile_confirm_route(
+    request: Request,
+    tx_id: str,
+    body: dict,
+    user: dict | None = Depends(get_optional_user),
+):
+    try:
+        tx = mobile_money_service.confirm_pin(tx_id, body.get("pin") or "", user)
+        return {"ok": True, "transaction": tx}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/mobile/webhook")
+async def mobile_webhook_route(request: Request):
+    raw = await request.body()
+    signature = request.headers.get("X-Signature") or request.headers.get("X-Hub-Signature") or ""
+    if not mobile_money_service.verify_webhook_signature(raw, signature):
+        raise HTTPException(status_code=401, detail={"error": "INVALID_SIGNATURE"})
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "INVALID_WEBHOOK"})
+    try:
+        tx = mobile_money_service.handle_webhook(payload if isinstance(payload, dict) else {})
+        return {"ok": True, "transaction": tx}
     except ValueError as e:
         _map_error(e)

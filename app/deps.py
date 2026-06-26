@@ -51,3 +51,25 @@ def require_roles(*roles: str):
         return user
 
     return checker
+
+
+def get_optional_user(
+    request: Request,
+    sac_access: str | None = Cookie(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+) -> dict | None:
+    token = sac_access
+    if not token and credentials:
+        token = credentials.credentials
+    if not token:
+        return None
+    try:
+        decoded = verify_access_token(token)
+        user = find_user_by_id(decoded["sub"])
+        if not user:
+            return None
+        request.state.user = user
+        request.state.session = user_to_session(user)
+        return user
+    except ValueError:
+        return None

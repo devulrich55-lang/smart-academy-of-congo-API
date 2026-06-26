@@ -1048,6 +1048,84 @@ def _migrate_social_posts_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_mobile_money_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mobile_money_transactions (
+                  id VARCHAR(80) PRIMARY KEY,
+                  provider VARCHAR(20) NOT NULL,
+                  payer_phone VARCHAR(30) NOT NULL,
+                  amount_cdf INT NOT NULL,
+                  amount_usd DECIMAL(12,2) NOT NULL DEFAULT 0,
+                  currency VARCHAR(10) NOT NULL DEFAULT 'CDF',
+                  purpose VARCHAR(40) NOT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                  reference_external VARCHAR(120) NULL,
+                  metadata_json TEXT NULL,
+                  user_email VARCHAR(255) NULL,
+                  universite VARCHAR(80) NULL,
+                  academic_payment_id VARCHAR(80) NULL,
+                  error_message VARCHAR(300) NULL,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL,
+                  completed_at VARCHAR(40) NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_mm_status ON mobile_money_transactions(status, created_at)",
+            "CREATE INDEX idx_mm_email ON mobile_money_transactions(user_email, created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mobile_money_transactions (
+              id TEXT PRIMARY KEY,
+              provider TEXT NOT NULL,
+              payer_phone TEXT NOT NULL,
+              amount_cdf INTEGER NOT NULL,
+              amount_usd REAL NOT NULL DEFAULT 0,
+              currency TEXT NOT NULL DEFAULT 'CDF',
+              purpose TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              reference_external TEXT,
+              metadata_json TEXT,
+              user_email TEXT,
+              universite TEXT,
+              academic_payment_id TEXT,
+              error_message TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              completed_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mm_status ON mobile_money_transactions(status, created_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mm_email ON mobile_money_transactions(user_email, created_at DESC)"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_mysql() -> SACDatabase:
     cfg = settings.mysql_config
     conn = pymysql.connect(
@@ -1076,6 +1154,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_platform_courses_table(conn, "mysql")
     _migrate_career_offers_table(conn, "mysql")
     _migrate_social_posts_table(conn, "mysql")
+    _migrate_mobile_money_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -1206,6 +1285,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_platform_courses_table(conn, "sqlite")
     _migrate_career_offers_table(conn, "sqlite")
     _migrate_social_posts_table(conn, "sqlite")
+    _migrate_mobile_money_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")

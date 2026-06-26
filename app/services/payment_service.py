@@ -296,21 +296,39 @@ def create_academic_payment(actor: dict, body: dict) -> dict:
     if actor.get("role") != "etudiant":
         raise ValueError("FORBIDDEN")
     campus = resolve_campus_id(actor.get("universite") or "") or actor.get("universite") or ""
-    bank = get_partner_bank(campus)
-    if not bank:
-        raise ValueError("BANK_NOT_CONFIGURED")
-    suffix = body.get("accountSuffix") or body.get("accountConfirmSuffix") or ""
-    if not verify_account_suffix(campus, suffix):
-        raise ValueError("ACCOUNT_SUFFIX_MISMATCH")
-    amount = float(body.get("amount") or 0)
-    if amount <= 0 or amount > 100000:
-        raise ValueError("INVALID_AMOUNT")
     method = str(body.get("method") or "").strip()
     if method not in VALID_METHODS:
         raise ValueError("INVALID_METHOD")
-    reference = clean_text(body.get("reference"), 120)
-    if not reference or len(reference) < 4:
-        raise ValueError("INVALID_REFERENCE")
+
+    mobile_tx_id = clean_text(body.get("mobileTransactionId"), 80)
+    if method in ("orange", "mpesa"):
+        if not mobile_tx_id:
+            raise ValueError("MOBILE_TX_REQUIRED")
+        from app.services import mobile_money_service
+
+        tx = mobile_money_service.assert_completed_for_use(
+            mobile_tx_id, "academic_fee", actor
+        )
+        if tx.get("universite") and not same_campus(campus, tx["universite"]):
+            raise ValueError("FORBIDDEN")
+        reference = mobile_tx_id
+        amount = float(body.get("amount") or tx.get("amountUsd") or 0)
+        currency = clean_text(body.get("currency"), 10) or "USD"
+    else:
+        bank = get_partner_bank(campus)
+        if not bank:
+            raise ValueError("BANK_NOT_CONFIGURED")
+        suffix = body.get("accountSuffix") or body.get("accountConfirmSuffix") or ""
+        if not verify_account_suffix(campus, suffix):
+            raise ValueError("ACCOUNT_SUFFIX_MISMATCH")
+        amount = float(body.get("amount") or 0)
+        currency = clean_text(body.get("currency"), 10) or "USD"
+        reference = clean_text(body.get("reference"), 120)
+        if not reference or len(reference) < 4:
+            raise ValueError("INVALID_REFERENCE")
+
+    if amount <= 0 or amount > 100000:
+        raise ValueError("INVALID_AMOUNT")
     fee_key = clean_text(body.get("feeKey"), 40) or "academic"
     fee_label = clean_text(body.get("feeLabel"), 200) or "Frais académiques"
     payment_id = clean_text(body.get("id"), 80) or f"PAY-{uuid.uuid4().hex[:12].upper()}"
@@ -335,7 +353,7 @@ def create_academic_payment(actor: dict, body: dict) -> dict:
             fee_key,
             fee_label,
             round(amount, 2),
-            clean_text(body.get("currency"), 10) or "USD",
+            currency,
             method,
             reference,
             "pending",
@@ -348,6 +366,12 @@ def create_academic_payment(actor: dict, body: dict) -> dict:
     row = db.execute(
         "SELECT * FROM academic_payments WHERE id = ?", (payment_id,)
     ).fetchone()
+    if method in ("orange", "mpesa") and mobile_tx_id:
+        db.execute(
+            "UPDATE mobile_money_transactions SET academic_payment_id = ? WHERE id = ?",
+            (payment_id, mobile_tx_id),
+        )
+        db.commit()
     return _row_to_payment(row)
 
 

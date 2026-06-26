@@ -91,6 +91,22 @@ class Settings:
     api_page_default: int = int(os.getenv("API_PAGE_DEFAULT", "50"))
     api_page_max: int = int(os.getenv("API_PAGE_MAX", "200"))
     pons_api_secret: str = os.getenv("PONS_API_SECRET", "").strip()
+    mobile_money_provider: str = os.getenv("MOBILE_MONEY_PROVIDER", "sandbox").strip().lower()
+    flexpay_api_url: str = os.getenv("FLEXPAY_API_URL", "").strip().rstrip("/")
+    flexpay_api_key: str = os.getenv("FLEXPAY_API_KEY", "").strip()
+    flexpay_merchant_id: str = os.getenv("FLEXPAY_MERCHANT_ID", "").strip()
+    mobile_money_webhook_secret: str = os.getenv("MOBILE_MONEY_WEBHOOK_SECRET", "").strip()
+    mobile_money_sandbox_pin: str = os.getenv("MOBILE_MONEY_SANDBOX_PIN", "").strip()
+    sac_orange_merchant_phone: str = os.getenv(
+        "SAC_ORANGE_MERCHANT_PHONE", "+243851848859"
+    ).strip()
+    sac_mpesa_merchant_phone: str = os.getenv(
+        "SAC_MPESA_MERCHANT_PHONE", "+243832479012"
+    ).strip()
+    api_public_url: str = os.getenv(
+        "API_PUBLIC_URL",
+        os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000"),
+    ).strip().rstrip("/")
 
     @property
     def use_mysql(self) -> bool:
