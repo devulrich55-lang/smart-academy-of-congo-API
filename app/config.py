@@ -107,6 +107,12 @@ class Settings:
         "API_PUBLIC_URL",
         os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000"),
     ).strip().rstrip("/")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    orientation_use_llm: bool = os.getenv("ORIENTATION_USE_LLM", "true").lower() == "true"
+    social_email_notifications: bool = (
+        os.getenv("SOCIAL_EMAIL_NOTIFICATIONS", "true").lower() == "true"
+    )
 
     @property
     def use_mysql(self) -> bool:

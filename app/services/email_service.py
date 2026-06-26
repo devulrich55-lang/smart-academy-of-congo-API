@@ -110,3 +110,51 @@ def send_password_reset_email(
     except Exception as exc:
         logger.error("Échec envoi e-mail à %s : %s", to_email, exc)
         return False
+
+
+def send_platform_notification_email(
+    to_email: str,
+    title: str,
+    message: str,
+    action_url: str = "",
+) -> bool:
+    """Notification campus (réseau social, activité plateforme)."""
+    if not smtp_configured() or not to_email:
+        return False
+
+    subject = f"Smart Academy — {title}"
+    text_body = (
+        f"{title}\n\n{message}\n\n"
+        + (f"Ouvrir : {action_url}\n\n" if action_url else "")
+        + "— Smart Academy of Congo\n"
+        "Vous recevez cet e-mail car vous êtes inscrit sur la plateforme SAC."
+    )
+    link_html = (
+        f'<p style="margin:20px 0;"><a href="{action_url}" '
+        'style="background:#0084ff;color:#fff;padding:12px 22px;border-radius:8px;'
+        'text-decoration:none;display:inline-block;">Voir sur SAC</a></p>'
+        if action_url
+        else ""
+    )
+    html_body = f"""<!DOCTYPE html>
+<html lang="fr"><body style="font-family:Arial,sans-serif;line-height:1.6;color:#1a2b3c;max-width:560px;margin:0 auto;padding:24px;">
+  <h2 style="color:#0c3d6e;">{title}</h2>
+  <p>{message}</p>
+  {link_html}
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+  <p style="font-size:12px;color:#5a6d7e;">Smart Academy of Congo — notification campus</p>
+</body></html>"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.email_from
+    msg["To"] = to_email
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        _send_via_smtp(to_email, msg)
+        return True
+    except Exception as exc:
+        logger.error("Échec notification e-mail à %s : %s", to_email, exc)
+        return False

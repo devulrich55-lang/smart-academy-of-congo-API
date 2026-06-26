@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.database import get_db
+from app.services import email_service
 from app.utils.platform_security import uid
 from app.utils.sanitize import clean_text
 
@@ -96,12 +97,22 @@ def _notify(
 ) -> None:
     if not recipient:
         return
+    recipient = recipient.lower()
     get_db().execute(
         """INSERT INTO social_notifications
            (id, universite, recipient_email, type, title, message, post_id, read_flag, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)""",
-        (uid("sntf"), universite, recipient.lower(), ntype, title, message, post_id or "", _now()),
+        (uid("sntf"), universite, recipient, ntype, title, message, post_id or "", _now()),
     )
+    if settings.social_email_notifications and email_service.smtp_configured():
+        action_url = f"{settings.frontend_url}/plateforme.html"
+        if ntype in ("reaction", "comment") and post_id:
+            action_url = f"{action_url}#reseau"
+        elif ntype == "message":
+            action_url = f"{action_url}#reseau"
+        email_service.send_platform_notification_email(
+            recipient, title, message, action_url
+        )
 
 
 def _dm_enabled(universite: str) -> bool:

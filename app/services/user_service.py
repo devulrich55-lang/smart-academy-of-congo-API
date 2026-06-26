@@ -6,7 +6,8 @@ from passlib.context import CryptContext
 
 from app.config import settings
 from app.database import get_db, row_to_user
-from app.utils.campus_catalog import normalize_profile_campus, registered_campus, resolve_campus_id
+from app.services import email_service
+from app.utils.campus_catalog import get_by_id, normalize_profile_campus, registered_campus, resolve_campus_id
 from app.utils.sanitize import (
     clean_email,
     clean_institutional_role,
@@ -36,6 +37,89 @@ def _clean_logo_url(val: object) -> str | None:
 
 def get_display_name_from_user(user: dict | None) -> str:
     return get_display_name(user) if user else "Utilisateur"
+
+
+def _campus_label(campus_id: str | None) -> str:
+    item = get_by_id(campus_id or "")
+    if item:
+        return f"{item['name']} ({item['sigle']})"
+    return campus_id or "votre campus"
+
+
+def _send_inscription_decision_email(student: dict, status: str, reason: str = "") -> None:
+    if not email_service.smtp_configured():
+        return
+    to = student.get("email")
+    if not to:
+        return
+    name = " ".join(p for p in [student.get("prenom"), student.get("nom")] if p).strip() or "Étudiant"
+    campus = _campus_label(student.get("universite"))
+    filiere = student.get("filiere") or "—"
+    if status == "approved":
+        title = "Inscription validée"
+        message = (
+            f"Bonjour {name}, votre inscription étudiant sur Smart Academy of Congo "
+            f"a été validée ({campus}, filière {filiere}). "
+            "Connectez-vous avec votre e-mail ou matricule et votre mot de passe."
+        )
+        action_url = f"{settings.frontend_url}/connexion.html"
+    else:
+        title = "Inscription refusée"
+        message = (
+            f"Bonjour {name}, votre inscription ({campus}, filière {filiere}) "
+            "n'a pas été acceptée par votre section."
+        )
+        if reason:
+            message += f" Motif : {reason}."
+        message += " Contactez le chef de section ou l'administration de votre université."
+        action_url = f"{settings.frontend_url}/attente-validation.html?status=rejected"
+    email_service.send_platform_notification_email(to, title, message, action_url)
+
+
+def _notify_section_pending_inscription(student: dict) -> None:
+    if not email_service.smtp_configured() or student.get("role") != "etudiant":
+        return
+    payment = student.get("payment") if isinstance(student.get("payment"), dict) else {}
+    if payment.get("method") == "section_delegate":
+        return
+    if payment.get("sectionApproval") in ("approved", "rejected"):
+        return
+    if payment.get("status") == "verified" and (
+        payment.get("method") in ("section_validation", "superadmin_validation")
+        or payment.get("verifiedBy")
+    ):
+        return
+
+    section_id = student.get("sectionId")
+    recipients: set[str] = set()
+    db = get_db()
+    if section_id:
+        sec = db.execute(
+            "SELECT email FROM faculty_sections WHERE id = ?", (section_id,)
+        ).fetchone()
+        if sec and sec["email"]:
+            recipients.add(str(sec["email"]).strip().lower())
+        for row in db.execute(
+            "SELECT email FROM users WHERE role = 'section' AND section_id = ?",
+            (section_id,),
+        ).fetchall():
+            if row["email"]:
+                recipients.add(str(row["email"]).strip().lower())
+
+    if not recipients:
+        return
+
+    name = " ".join(p for p in [student.get("prenom"), student.get("nom")] if p).strip()
+    title = "Nouvelle inscription en attente"
+    message = (
+        f"{name or student.get('email')} ({student.get('email')}) "
+        f"s'est inscrit et attend votre validation "
+        f"(filière {student.get('filiere') or '—'}, "
+        f"matricule {student.get('matricule') or '—'})."
+    )
+    action_url = f"{settings.frontend_url}/dashboard-section.html"
+    for to in recipients:
+        email_service.send_platform_notification_email(to, title, message, action_url)
 
 
 def find_user_by_email(email: str) -> dict | None:
@@ -242,7 +326,10 @@ def create_user(profile: dict) -> dict:
         ),
     )
     get_db().commit()
-    return find_user_by_id(user_id)
+    created = find_user_by_id(user_id)
+    if created and role == "etudiant":
+        _notify_section_pending_inscription(created)
+    return created
 
 
 def user_to_session(user: dict | None) -> dict | None:
@@ -585,7 +672,14 @@ def set_student_section_approval(
         ),
     )
     get_db().commit()
-    return find_user_by_id(student["id"])
+    updated = find_user_by_id(student["id"])
+    if updated:
+        _send_inscription_decision_email(
+            updated,
+            status,
+            clean_text(reason, 300) if status == "rejected" else "",
+        )
+    return updated
 
 
 def list_students_for_professor(actor: dict) -> list[dict]:

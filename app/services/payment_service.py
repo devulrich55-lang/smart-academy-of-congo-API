@@ -3,7 +3,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.database import get_db
+from app.services import email_service
 from app.services.tariff_service import find_university_by_code
 from app.utils.campus_catalog import resolve_campus_id, same_campus
 from app.utils.sanitize import clean_text
@@ -428,4 +430,25 @@ def update_payment_status(actor: dict, payment_id: str, body: dict) -> dict:
     row = db.execute(
         "SELECT * FROM academic_payments WHERE id = ?", (payment_id,)
     ).fetchone()
-    return _row_to_payment(row)
+    payment = _row_to_payment(row)
+    if email_service.smtp_configured() and row["student_email"]:
+        if status == "confirmed":
+            title = "Paiement confirmé"
+            msg = (
+                f"Votre paiement « {payment['feeLabel']} » "
+                f"({payment['amount']} {payment['currency']}) a été confirmé par l'université."
+            )
+        else:
+            title = "Paiement refusé"
+            msg = (
+                f"Votre paiement « {payment['feeLabel']} » "
+                f"({payment['amount']} {payment['currency']}) n'a pas été validé. "
+                "Contactez le service scolarité de votre campus."
+            )
+        email_service.send_platform_notification_email(
+            row["student_email"],
+            title,
+            msg,
+            f"{settings.frontend_url}/dashboard-etudiant.html#frais",
+        )
+    return payment

@@ -146,3 +146,13 @@ def normalize_profile_campus(profile: dict | None) -> dict:
         if not out.get("codeUni"):
             out["codeUni"] = f"SAC-{item['sigle']}-{datetime.now().year}"
     return out
+
+
+def catalog_payload() -> dict:
+    """Réponse API — alignée sur js/sac-universities.js."""
+    return {
+        "universities": list(UNIVERSITIES),
+        "institutes": list(INSTITUTES),
+        "all": list(CATALOG),
+        "count": len(CATALOG),
+    }

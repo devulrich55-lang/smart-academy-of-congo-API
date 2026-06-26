@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.database import get_db
+from app.services import email_service
 from app.utils.platform_security import uid
 from app.utils.sanitize import clean_text
 
@@ -317,6 +319,16 @@ def apply(actor: dict, offer_id: str, message: str = "") -> dict:
     app = get_db().execute(
         "SELECT * FROM career_applications WHERE id = ?", (app_id,)
     ).fetchone()
+    contact = (row["contact_email"] or "").strip().lower()
+    if contact and email_service.smtp_configured():
+        student = " ".join(p for p in [actor.get("prenom"), actor.get("nom")] if p).strip() or email
+        email_service.send_platform_notification_email(
+            contact,
+            "Nouvelle candidature — " + (row["title"] or "Offre"),
+            f"{student} ({email}) a postulé pour « {row['title']} »."
+            + (f"\n\nMessage : {clean_text(message, 500)}" if message else ""),
+            f"{settings.frontend_url}/plateforme.html#stages",
+        )
     return _app_to_dict(app, row)
 
 

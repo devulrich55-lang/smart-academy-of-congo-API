@@ -9,6 +9,7 @@ from app.rate_limit import limiter
 from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, live_service, meeting_service, orientation_service, platform_service, social_service
 from app.services import reclamation_service
 from app.services.user_service import get_campus_branding, list_students_for_professor
+from app.utils.campus_catalog import catalog_payload, get_by_id, resolve_campus_id
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
 from app.utils.pagination import clamp_page
 
@@ -116,6 +117,19 @@ def verify_diploma_route(body: dict, request: Request):
         meta={"number": str(number)[:12]},
     )
     return platform_service.verify_diploma(code, number)
+
+
+@router.get("/campus-catalog")
+def campus_catalog_route():
+    """Catalogue national des établissements — public, aligné sac-universities.js."""
+    return catalog_payload()
+
+
+@router.get("/campus-catalog/resolve")
+def campus_catalog_resolve_route(q: str = Query("", alias="q")):
+    campus_id = resolve_campus_id(q)
+    item = get_by_id(campus_id) if campus_id else None
+    return {"id": campus_id, "item": item}
 
 
 @router.get("/grades/me")
@@ -687,20 +701,24 @@ def get_correction(submission_id: str, user: dict = Depends(get_current_user)):
     return {"submission": sub}
 
 
+@router.get("/orientation/status")
+def orientation_status_route(user: dict = Depends(get_current_user)):
+    return orientation_service.status()
+
+
 @router.post("/orientation")
 def orientation(body: dict, request: Request, user: dict = Depends(require_roles("etudiant"))):
-    advice = platform_service.get_orientation_advice(
-        {
-            "filiere": body.get("filiere") or user.get("filiere"),
-            "niveau": body.get("niveau") or user.get("niveau"),
-            "universite": user.get("universite"),
-            "interests": body.get("interests"),
-        }
-    )
+    try:
+        advice = orientation_service.advise(user, body.get("interests") or "")
+    except ValueError as e:
+        _handle_platform_error(e)
     audit_service.log_audit(
-        request, "orientation_ia", "orientation", meta={"domain": advice.get("domain")}
+        request,
+        "orientation_ia",
+        "orientation",
+        meta={"domain": advice.get("domain"), "source": advice.get("source")},
     )
-    return {"advice": advice}
+    return {"ok": True, "advice": advice}
 
 
 @router.get("/students/teaching")
@@ -1357,18 +1375,6 @@ def moderate_social_post(
             return {"ok": True, "post": post}
         post = social_service.set_hidden(user, post_id, bool(body.get("hidden")))
         return {"ok": True, "post": post}
-    except ValueError as e:
-        _handle_platform_error(e)
-
-
-@router.post("/orientation")
-def orientation_advice_route(
-    body: dict,
-    user: dict = Depends(require_roles("etudiant")),
-):
-    try:
-        advice = orientation_service.advise(user, body.get("interests") or "")
-        return {"ok": True, "advice": advice}
     except ValueError as e:
         _handle_platform_error(e)
 
