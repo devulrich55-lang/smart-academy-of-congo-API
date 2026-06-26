@@ -1158,9 +1158,117 @@ def update_career_application_route(
 
 
 @router.get("/social")
-def list_social_posts(user: dict = Depends(get_current_user)):
+def list_social_posts(
+    user: dict = Depends(get_current_user),
+    q: str | None = Query(None),
+    hashtag: str | None = Query(None),
+    group: str | None = Query(None),
+    feed: str | None = Query(None),
+):
     try:
-        return {"posts": social_service.list_posts(user)}
+        posts = social_service.list_posts(
+            user,
+            {"q": q, "hashtag": hashtag, "group": group, "feed": feed},
+        )
+        return {"posts": posts}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/events")
+def list_social_events(user: dict = Depends(get_current_user)):
+    try:
+        return {"events": social_service.list_events(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/hashtags")
+def list_social_hashtags(user: dict = Depends(get_current_user)):
+    try:
+        return {"hashtags": social_service.trending_hashtags(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/settings")
+def get_social_settings(user: dict = Depends(get_current_user)):
+    try:
+        return social_service.get_settings(user)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/social/settings")
+def patch_social_settings(
+    body: dict,
+    user: dict = Depends(require_roles("universite", "section", "ministere")),
+):
+    try:
+        return social_service.update_settings(user, body)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/notifications")
+def list_social_notifications(user: dict = Depends(get_current_user)):
+    try:
+        return {"notifications": social_service.list_notifications(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.patch("/social/notifications/{notif_id}/read")
+def read_social_notification(
+    notif_id: str,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        return social_service.mark_notification_read(user, notif_id)
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/messages/conversations")
+def list_social_conversations(user: dict = Depends(require_roles("etudiant"))):
+    try:
+        return {"conversations": social_service.list_conversations(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/messages/with/{peer_email}")
+def list_social_messages(
+    peer_email: str,
+    user: dict = Depends(require_roles("etudiant")),
+):
+    try:
+        return {"messages": social_service.list_messages(user, peer_email)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social/messages", status_code=201)
+def send_social_message(
+    body: dict,
+    user: dict = Depends(require_roles("etudiant")),
+):
+    try:
+        msg = social_service.send_message(user, body)
+        return {"ok": True, "message": msg}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social/upload")
+async def upload_social_media(
+    file: UploadFile = File(...),
+    kind: str = Query("photo"),
+    user: dict = Depends(require_roles("etudiant", "professeur", "assistant", "universite", "section")),
+):
+    try:
+        content = await file.read()
+        return social_service.save_upload(user, file.filename or "file", content, kind)
     except ValueError as e:
         _handle_platform_error(e)
 
@@ -1189,6 +1297,43 @@ def toggle_social_like(
         _handle_platform_error(e)
 
 
+@router.post("/social/{post_id}/reaction")
+def toggle_social_reaction(
+    post_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        post = social_service.toggle_reaction(user, post_id, body.get("reaction") or "like")
+        return {"ok": True, "post": post}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.get("/social/{post_id}/comments")
+def list_social_comments(
+    post_id: str,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        return {"comments": social_service.list_comments(user, post_id)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social/{post_id}/comments", status_code=201)
+def add_social_comment(
+    post_id: str,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        comment = social_service.add_comment(user, post_id, body.get("content") or "")
+        return {"ok": True, "comment": comment}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
 @router.delete("/social/{post_id}")
 def delete_social_post(
     post_id: str,
@@ -1204,9 +1349,12 @@ def delete_social_post(
 def moderate_social_post(
     post_id: str,
     body: dict,
-    user: dict = Depends(require_roles("universite", "section")),
+    user: dict = Depends(require_roles("universite", "section", "ministere")),
 ):
     try:
+        if "pinned" in body:
+            post = social_service.set_pinned(user, post_id, bool(body.get("pinned")))
+            return {"ok": True, "post": post}
         post = social_service.set_hidden(user, post_id, bool(body.get("hidden")))
         return {"ok": True, "post": post}
     except ValueError as e:
@@ -1319,10 +1467,15 @@ def _handle_platform_error(exc: ValueError) -> None:
         raise HTTPException(status_code=404, detail={"error": code})
     if code == "INVALID_INPUT":
         raise HTTPException(status_code=400, detail={"error": code})
+    if code == "DM_DISABLED":
+        raise HTTPException(
+            status_code=403,
+            detail={"error": code, "message": "Messages privés désactivés sur ce campus."},
+        )
     if code == "FILE_TOO_LARGE":
         raise HTTPException(
             status_code=413,
-            detail={"error": code, "message": "Enregistrement max 100 Mo"},
+            detail={"error": code, "message": "Fichier trop volumineux."},
         )
     if code == "INVALID_LANG":
         raise HTTPException(

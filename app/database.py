@@ -1048,6 +1048,151 @@ def _migrate_social_posts_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_social_network_v2(conn, backend: str) -> None:
+    post_cols = [
+        ("post_type", "VARCHAR(20) NULL DEFAULT 'text'", "TEXT DEFAULT 'text'"),
+        ("media_url", "VARCHAR(500) NULL", "TEXT"),
+        ("media_name", "VARCHAR(200) NULL", "TEXT"),
+        ("hashtags_json", "TEXT NULL", "TEXT DEFAULT '[]'"),
+        ("group_key", "VARCHAR(120) NULL", "TEXT"),
+        ("niveau", "VARCHAR(40) NULL", "TEXT"),
+        ("pinned", "TINYINT(1) NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+        ("event_at", "VARCHAR(40) NULL", "TEXT"),
+        ("event_title", "VARCHAR(200) NULL", "TEXT"),
+        ("reactions_json", "TEXT NULL", "TEXT DEFAULT '{}'"),
+        ("comment_count", "INT NOT NULL DEFAULT 0", "INTEGER NOT NULL DEFAULT 0"),
+    ]
+
+    if backend == "mysql":
+        cur = conn.cursor()
+        for col, mysql_def, _sqlite_def in post_cols:
+            try:
+                cur.execute(f"ALTER TABLE social_posts ADD COLUMN {col} {mysql_def}")
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] != 1060:
+                    raise
+        for ddl in (
+            """
+            CREATE TABLE IF NOT EXISTS social_comments (
+              id VARCHAR(80) PRIMARY KEY,
+              post_id VARCHAR(80) NOT NULL,
+              universite VARCHAR(80) NOT NULL,
+              author_email VARCHAR(255) NOT NULL,
+              author_name VARCHAR(200) NULL,
+              author_role VARCHAR(20) NULL,
+              content TEXT NOT NULL,
+              created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS social_messages (
+              id VARCHAR(80) PRIMARY KEY,
+              universite VARCHAR(80) NOT NULL,
+              from_email VARCHAR(255) NOT NULL,
+              from_name VARCHAR(200) NULL,
+              to_email VARCHAR(255) NOT NULL,
+              to_name VARCHAR(200) NULL,
+              body TEXT NOT NULL,
+              read_flag TINYINT(1) NOT NULL DEFAULT 0,
+              created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS social_notifications (
+              id VARCHAR(80) PRIMARY KEY,
+              universite VARCHAR(80) NOT NULL,
+              recipient_email VARCHAR(255) NOT NULL,
+              type VARCHAR(30) NOT NULL,
+              title VARCHAR(200) NOT NULL,
+              message TEXT NULL,
+              post_id VARCHAR(80) NULL,
+              read_flag TINYINT(1) NOT NULL DEFAULT 0,
+              created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS social_campus_settings (
+              universite VARCHAR(80) PRIMARY KEY,
+              private_dm_enabled TINYINT(1) NOT NULL DEFAULT 1,
+              updated_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+        ):
+            try:
+                cur.execute(ddl)
+                conn.commit()
+            except pymysql.err.OperationalError:
+                pass
+        for idx_sql in (
+            "CREATE INDEX idx_social_comments_post ON social_comments(post_id, created_at)",
+            "CREATE INDEX idx_social_msg_peer ON social_messages(universite, to_email, created_at)",
+            "CREATE INDEX idx_social_notif ON social_notifications(recipient_email, read_flag, created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    for col, _mysql_def, sqlite_def in post_cols:
+        try:
+            conn.execute(f"ALTER TABLE social_posts ADD COLUMN {col} {sqlite_def}")
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS social_comments (
+              id TEXT PRIMARY KEY,
+              post_id TEXT NOT NULL,
+              universite TEXT NOT NULL,
+              author_email TEXT NOT NULL,
+              author_name TEXT,
+              author_role TEXT,
+              content TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS social_messages (
+              id TEXT PRIMARY KEY,
+              universite TEXT NOT NULL,
+              from_email TEXT NOT NULL,
+              from_name TEXT,
+              to_email TEXT NOT NULL,
+              to_name TEXT,
+              body TEXT NOT NULL,
+              read_flag INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS social_notifications (
+              id TEXT PRIMARY KEY,
+              universite TEXT NOT NULL,
+              recipient_email TEXT NOT NULL,
+              type TEXT NOT NULL,
+              title TEXT NOT NULL,
+              message TEXT,
+              post_id TEXT,
+              read_flag INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS social_campus_settings (
+              universite TEXT PRIMARY KEY,
+              private_dm_enabled INTEGER NOT NULL DEFAULT 1,
+              updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_social_comments_post ON social_comments(post_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_social_msg_peer ON social_messages(universite, to_email, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_social_notif ON social_notifications(recipient_email, read_flag, created_at DESC);
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_mobile_money_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1250,6 +1395,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_platform_courses_table(conn, "mysql")
     _migrate_career_offers_table(conn, "mysql")
     _migrate_social_posts_table(conn, "mysql")
+    _migrate_social_network_v2(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
@@ -1382,6 +1528,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_platform_courses_table(conn, "sqlite")
     _migrate_career_offers_table(conn, "sqlite")
     _migrate_social_posts_table(conn, "sqlite")
+    _migrate_social_network_v2(conn, "sqlite")
     _migrate_mobile_money_table(conn, "sqlite")
     _migrate_live_sessions_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
