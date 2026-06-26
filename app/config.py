@@ -190,6 +190,16 @@ if not settings.email_from:
 if settings.frontend_url and settings.frontend_url.rstrip("/") not in settings.allowed_origins:
     settings.allowed_origins.append(settings.frontend_url.rstrip("/"))
 
+# Render : autoriser les frontends SAC connus si ALLOWED_ORIGINS incomplet
+if os.getenv("RENDER", "").lower() == "true":
+    for _origin in (
+        "https://smart-academy-of-congo-dbfm.onrender.com",
+        "https://smart-academy-of-congo.onrender.com",
+        "https://smart-academy-of-congo-frontend.onrender.com",
+    ):
+        if _origin not in settings.allowed_origins:
+            settings.allowed_origins.append(_origin)
+
 
 def _render_data_writable() -> bool:
     """Vérifie si le disque /data est monté et accessible en écriture."""
