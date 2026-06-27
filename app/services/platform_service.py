@@ -1038,7 +1038,11 @@ def update_live_recording(user: dict, session_id: str, recording_url: str) -> di
 
 
 def upsert_presence(user: dict, data: dict | None = None) -> dict:
+    from app.services.user_service import migrate_user_campus_if_needed
+    from app.utils.campus_catalog import registered_campus, resolve_campus_id
+
     payload = data or {}
+    user = migrate_user_campus_if_needed(user) or user
     now = _now()
     db = get_db()
 
@@ -1047,7 +1051,9 @@ def upsert_presence(user: dict, data: dict | None = None) -> dict:
     section_id = payload.get("sectionId") or user.get("sectionId")
     role = user.get("role") or "etudiant"
     email = (user.get("email") or "").strip().lower()
-    universite = user.get("universite")
+    universite = registered_campus(user) or payload.get("universite") or user.get("universite")
+    if universite:
+        universite = resolve_campus_id(str(universite)) or str(universite).strip()
 
     if not email or not universite:
         raise ValueError("INVALID_INPUT")

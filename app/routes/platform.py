@@ -721,7 +721,7 @@ def professor_students(user: dict = Depends(require_roles("professeur"))):
 @router.post("/presence/ping")
 def ping_presence(body: dict, user: dict = Depends(get_current_user)):
     try:
-        payload = pick_fields(body or {}, "classe", "filiere", "sectionId")
+        payload = pick_fields(body or {}, "classe", "filiere", "sectionId", "universite")
         return platform_service.upsert_presence(user, payload)
     except ValueError as e:
         _handle_platform_error(e)
