@@ -1048,6 +1048,71 @@ def _migrate_social_posts_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_social_posts_sqlite_rebuild_legacy(conn: sqlite3.Connection) -> None:
+    """Ancien schema-platform.sql : CHECK audience + updated_at NOT NULL sans colonnes v2."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='social_posts'"
+    ).fetchone()
+    if not row:
+        return
+    ddl = row["sql"] or ""
+    if "CHECK (audience IN ('campus','filiere'))" not in ddl:
+        return
+    conn.executescript(
+        """
+        CREATE TABLE social_posts_v2 (
+          id TEXT PRIMARY KEY,
+          universite TEXT NOT NULL,
+          author_email TEXT NOT NULL,
+          author_name TEXT,
+          author_role TEXT,
+          content TEXT NOT NULL,
+          audience TEXT NOT NULL DEFAULT 'campus',
+          filiere TEXT,
+          niveau TEXT,
+          group_key TEXT,
+          post_type TEXT DEFAULT 'text',
+          media_url TEXT,
+          media_name TEXT,
+          hashtags_json TEXT DEFAULT '[]',
+          pinned INTEGER NOT NULL DEFAULT 0,
+          event_at TEXT,
+          event_title TEXT,
+          likes_json TEXT DEFAULT '[]',
+          reactions_json TEXT DEFAULT '{}',
+          hidden INTEGER NOT NULL DEFAULT 0,
+          comment_count INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT
+        );
+        INSERT INTO social_posts_v2 (
+          id, universite, author_email, author_name, author_role, content,
+          audience, filiere, media_url, likes_json, hidden, created_at, updated_at,
+          post_type, media_name, hashtags_json, pinned, reactions_json, comment_count
+        )
+        SELECT
+          id, universite, author_email, author_name, author_role, content,
+          audience, filiere, media_url,
+          COALESCE(likes_json, likes, '[]'),
+          COALESCE(hidden, 0),
+          created_at,
+          COALESCE(updated_at, created_at),
+          COALESCE(post_type, 'text'),
+          media_name,
+          COALESCE(hashtags_json, '[]'),
+          COALESCE(pinned, 0),
+          COALESCE(reactions_json, '{}'),
+          COALESCE(comment_count, 0)
+        FROM social_posts;
+        DROP TABLE social_posts;
+        ALTER TABLE social_posts_v2 RENAME TO social_posts;
+        CREATE INDEX IF NOT EXISTS idx_social_campus ON social_posts(universite, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_social_author ON social_posts(author_email, created_at DESC);
+        """
+    )
+    conn.commit()
+
+
 def _migrate_social_network_v2(conn, backend: str) -> None:
     post_cols = [
         ("post_type", "VARCHAR(20) NULL DEFAULT 'text'", "TEXT DEFAULT 'text'"),
@@ -1090,6 +1155,20 @@ def _migrate_social_network_v2(conn, backend: str) -> None:
             except pymysql.err.OperationalError as exc:
                 if exc.args[0] != 1060:
                     raise
+        try:
+            cur.execute("ALTER TABLE social_posts ADD COLUMN updated_at VARCHAR(40) NULL")
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
+        try:
+            cur.execute(
+                "UPDATE social_posts SET updated_at = created_at "
+                "WHERE updated_at IS NULL OR updated_at = ''"
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
         for ddl in (
             """
             CREATE TABLE IF NOT EXISTS social_comments (
@@ -1178,6 +1257,19 @@ def _migrate_social_network_v2(conn, backend: str) -> None:
             conn.execute(f"ALTER TABLE social_posts ADD COLUMN {col} {sqlite_def}")
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute("ALTER TABLE social_posts ADD COLUMN updated_at TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "UPDATE social_posts SET updated_at = created_at "
+            "WHERE updated_at IS NULL OR updated_at = ''"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    _migrate_social_posts_sqlite_rebuild_legacy(conn)
     try:
         conn.executescript(
             """

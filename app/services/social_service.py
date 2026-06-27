@@ -492,8 +492,8 @@ def create_post(actor: dict, data: dict) -> dict:
             id, universite, author_email, author_name, author_role,
             content, audience, filiere, niveau, group_key, post_type,
             media_url, media_name, hashtags_json, pinned, event_at, event_title,
-            likes_json, reactions_json, hidden, comment_count, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '{}', 0, 0, ?)""",
+            likes_json, reactions_json, hidden, comment_count, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '{}', 0, 0, ?, ?)""",
         (
             item_id,
             campus,
@@ -512,6 +512,7 @@ def create_post(actor: dict, data: dict) -> dict:
             1 if pinned else 0,
             event_at or None,
             event_title,
+            now,
             now,
         ),
     )
