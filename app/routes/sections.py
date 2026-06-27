@@ -9,8 +9,8 @@ from app.services.user_service import (
     create_student_for_section,
     find_user_by_email,
     link_student_to_section,
-    list_students_for_section,
     list_pending_students_for_section,
+    list_students_for_section,
     set_student_section_approval,
     user_to_session,
 )
@@ -46,6 +46,23 @@ def _map_error(exc: ValueError):
     raise exc
 
 
+def _require_student_delegate(user: dict = Depends(get_current_user)) -> dict:
+    role = user.get("role")
+    if role in ("section", "universite"):
+        return user
+    if role == "professeur" and _is_section_head_actor(user):
+        return user
+    raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "Accès refusé"})
+
+
+def _approve_student(user: dict, email: str, body: dict) -> dict:
+    status = str(body.get("status") or "approved").strip()
+    if status == "confirmed":
+        status = "approved"
+    reason = str(body.get("reason") or "").strip()
+    return set_student_section_approval(user, email, status, reason)
+
+
 @router.get("")
 def list_sections_route(user: dict = Depends(get_current_user)):
     return {"sections": reclamation_service.list_sections_for_actor(user)}
@@ -70,33 +87,11 @@ def upsert_section_route(
         _map_error(e)
 
 
-@router.patch("/{section_id}")
-@limiter.limit("40/hour")
-def update_section_route(
-    section_id: str,
-    request: Request,
-    body: dict,
-    user: dict = Depends(require_roles("universite")),
-):
-    try:
-        section = reclamation_service.update_section(
-            user, section_id, strip_identity_fields(body)
-        )
-        audit_service.log_audit(
-            request,
-            "update_section",
-            "section",
-            resource_id=section_id,
-            universite=section.get("universite"),
-        )
-        return {"section": section}
-    except ValueError as e:
-        _map_error(e)
-
-
 @router.post("/head-account", status_code=201)
 @limiter.limit("20/hour")
-def create_head_account_route(request: Request, body: dict, user: dict = Depends(require_roles("universite"))):
+def create_head_account_route(
+    request: Request, body: dict, user: dict = Depends(require_roles("universite"))
+):
     email = validate_email_strict(body.get("email"))
     if not email or not validate_password(body.get("password")):
         raise HTTPException(
@@ -125,15 +120,6 @@ def create_head_account_route(request: Request, body: dict, user: dict = Depends
         return {"ok": True, "user": user_to_session(created)}
     except ValueError as e:
         _map_error(e)
-
-
-def _require_student_delegate(user: dict = Depends(get_current_user)) -> dict:
-    role = user.get("role")
-    if role in ("section", "universite"):
-        return user
-    if role == "professeur" and _is_section_head_actor(user):
-        return user
-    raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "Accès refusé"})
 
 
 @router.post("/students", status_code=201)
@@ -205,6 +191,66 @@ def create_student_route(
         _map_error(e)
 
 
+@router.post("/students/link")
+@limiter.limit("60/hour")
+def link_student_post_route(
+    request: Request,
+    body: dict,
+    user: dict = Depends(_require_student_delegate),
+):
+    email = validate_email_strict(body.get("email"))
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_INPUT", "message": "E-mail étudiant requis"},
+        )
+    try:
+        updated = link_student_to_section(user, email, body or {})
+        audit_service.log_audit(
+            request,
+            "link_student_section",
+            "user",
+            resource_id=updated.get("id"),
+            universite=user.get("universite"),
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/students/approval")
+@limiter.limit("60/hour")
+def approve_student_post_route(
+    request: Request,
+    body: dict,
+    user: dict = Depends(_require_student_delegate),
+):
+    email = validate_email_strict(body.get("email"))
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_INPUT", "message": "E-mail étudiant requis"},
+        )
+    try:
+        updated = _approve_student(user, email, body or {})
+        audit_service.log_audit(
+            request,
+            "approve_student_section",
+            "user",
+            resource_id=updated.get("id"),
+            universite=user.get("universite"),
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        code = str(e)
+        if code == "INVALID_STATUS":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": code, "message": "Statut de validation invalide"},
+            )
+        _map_error(e)
+
+
 @router.get("/students/pending")
 def list_pending_students_route(user: dict = Depends(_require_student_delegate)):
     students = list_pending_students_for_section(user)
@@ -251,12 +297,8 @@ def approve_student_route(
     body: dict,
     user: dict = Depends(_require_student_delegate),
 ):
-    status = str(body.get("status") or "approved").strip()
-    if status == "confirmed":
-        status = "approved"
-    reason = str(body.get("reason") or "").strip()
     try:
-        updated = set_student_section_approval(user, student_email, status, reason)
+        updated = _approve_student(user, student_email, body or {})
         audit_service.log_audit(
             request,
             "approve_student_section",
@@ -272,4 +314,28 @@ def approve_student_route(
                 status_code=400,
                 detail={"error": code, "message": "Statut de validation invalide"},
             )
+        _map_error(e)
+
+
+@router.patch("/{section_id}")
+@limiter.limit("40/hour")
+def update_section_route(
+    section_id: str,
+    request: Request,
+    body: dict,
+    user: dict = Depends(require_roles("universite")),
+):
+    try:
+        section = reclamation_service.update_section(
+            user, section_id, strip_identity_fields(body)
+        )
+        audit_service.log_audit(
+            request,
+            "update_section",
+            "section",
+            resource_id=section_id,
+            universite=section.get("universite"),
+        )
+        return {"section": section}
+    except ValueError as e:
         _map_error(e)
