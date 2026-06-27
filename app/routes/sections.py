@@ -7,6 +7,8 @@ from app.services.user_service import (
     _is_section_head_actor,
     create_section_head_account,
     create_student_for_section,
+    find_user_by_email,
+    link_student_to_section,
     list_students_for_section,
     set_student_section_approval,
     user_to_session,
@@ -135,7 +137,36 @@ def create_student_route(
     request: Request, body: dict, user: dict = Depends(_require_student_delegate)
 ):
     email = validate_email_strict(body.get("email"))
-    if not email or not validate_password(body.get("password")):
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_INPUT", "message": "E-mail réel requis"},
+        )
+
+    existing = find_user_by_email(email)
+    if existing and existing.get("role") == "etudiant":
+        try:
+            profile = {
+                "email": email,
+                "filiere": body.get("filiere"),
+                "universite": body.get("universite"),
+                "sectionId": body.get("sectionId"),
+                "niveau": body.get("niveau"),
+                "classe": body.get("classe"),
+            }
+            linked = link_student_to_section(user, email, profile)
+            audit_service.log_audit(
+                request,
+                "link_student_section",
+                "user",
+                resource_id=linked.get("id"),
+                universite=user.get("universite"),
+            )
+            return {"ok": True, "user": user_to_session(linked), "linked": True}
+        except ValueError as e:
+            _map_error(e)
+
+    if not validate_password(body.get("password")):
         raise HTTPException(
             status_code=400,
             detail={
@@ -175,6 +206,28 @@ def list_students_route(user: dict = Depends(_require_student_delegate)):
     return {
         "students": [user_to_session(s) for s in students if s],
     }
+
+
+@router.patch("/students/{student_email}/link")
+@limiter.limit("60/hour")
+def link_student_route(
+    student_email: str,
+    request: Request,
+    body: dict,
+    user: dict = Depends(_require_student_delegate),
+):
+    try:
+        updated = link_student_to_section(user, student_email, body or {})
+        audit_service.log_audit(
+            request,
+            "link_student_section",
+            "user",
+            resource_id=updated.get("id"),
+            universite=user.get("universite"),
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        _map_error(e)
 
 
 @router.patch("/students/{student_email}/approval")

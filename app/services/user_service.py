@@ -513,6 +513,18 @@ def create_section_head_account(university_actor: dict, profile: dict) -> dict:
     return create_user(profile)
 
 
+def link_student_to_section(actor: dict, email: str, profile: dict | None = None) -> dict:
+    target_email = validate_email_strict(email) or clean_email(email)
+    if not target_email:
+        raise ValueError("INVALID_INPUT")
+    student = find_user_by_email(target_email)
+    if not student or student.get("role") != "etudiant":
+        raise ValueError("NOT_FOUND")
+    payload = dict(profile or {})
+    payload["email"] = target_email
+    return _link_existing_student_to_section(actor, student, payload)
+
+
 def _link_existing_student_to_section(actor: dict, student: dict, profile: dict) -> dict:
     if not _student_manageable_by_actor(student, actor):
         raise ValueError("FORBIDDEN")
@@ -788,6 +800,7 @@ def set_student_section_approval(
     get_db().commit()
     updated = find_user_by_id(student["id"])
     if updated:
+        updated["sectionApproval"] = status
         _send_inscription_decision_email(
             updated,
             status,
