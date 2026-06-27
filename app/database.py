@@ -1065,7 +1065,7 @@ def _migrate_social_network_v2(conn, backend: str) -> None:
 
     if backend == "mysql":
         cur = conn.cursor()
-        for col, mysql_def, _sqlite_def in (
+        for col, mysql_def in (
             ("hidden", "TINYINT(1) NOT NULL DEFAULT 0"),
             ("likes_json", "TEXT NULL"),
         ):
@@ -1156,7 +1156,7 @@ def _migrate_social_network_v2(conn, backend: str) -> None:
         cur.close()
         return
 
-    for col, _mysql_def, sqlite_def in (
+    for col, sqlite_def in (
         ("hidden", "INTEGER NOT NULL DEFAULT 0"),
         ("likes_json", "TEXT DEFAULT '[]'"),
     ):
