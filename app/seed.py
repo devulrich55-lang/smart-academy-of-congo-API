@@ -230,13 +230,16 @@ def seed_demo_sections_if_missing() -> None:
 
 
 INSTITUTIONAL_PASSWORD = "Admin2025!"
-SUPERADMIN_SEED_EMAIL = "djemcibamba@gmail.com"
+SUPERADMIN_SEED_EMAIL = "ulrichcibamba55@gmail.com"
 SUPERADMIN_SEED_PASSWORD = "Ulrich11+"
-LEGACY_SUPERADMIN_EMAIL = "admin@superadmin.cd"
+LEGACY_SUPERADMIN_EMAILS = (
+    "admin@superadmin.cd",
+    "djemcibamba@gmail.com",
+)
 
 
 def _ensure_superadmin_seed() -> None:
-    """Compte Super Admin principal — création ou migration depuis l'ancien seed."""
+    """Compte Super Admin principal — création ou migration depuis un ancien seed."""
     from app.database import get_db
     from app.services.user_service import create_user, find_user_by_email, update_password
     from datetime import datetime, timezone
@@ -246,22 +249,23 @@ def _ensure_superadmin_seed() -> None:
         update_password(target["id"], SUPERADMIN_SEED_PASSWORD)
         return
 
-    legacy = find_user_by_email(LEGACY_SUPERADMIN_EMAIL)
-    if legacy and legacy.get("role") == "superadmin":
-        now = datetime.now(timezone.utc).isoformat()
-        get_db().execute(
-            "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
-            (SUPERADMIN_SEED_EMAIL, now, legacy["id"]),
-        )
-        get_db().commit()
-        update_password(legacy["id"], SUPERADMIN_SEED_PASSWORD)
-        print(
-            "[SAC] Super Admin migré:",
-            LEGACY_SUPERADMIN_EMAIL,
-            "→",
-            SUPERADMIN_SEED_EMAIL,
-        )
-        return
+    for legacy_email in LEGACY_SUPERADMIN_EMAILS:
+        legacy = find_user_by_email(legacy_email)
+        if legacy and legacy.get("role") == "superadmin":
+            now = datetime.now(timezone.utc).isoformat()
+            get_db().execute(
+                "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
+                (SUPERADMIN_SEED_EMAIL, now, legacy["id"]),
+            )
+            get_db().commit()
+            update_password(legacy["id"], SUPERADMIN_SEED_PASSWORD)
+            print(
+                "[SAC] Super Admin migré:",
+                legacy_email,
+                "→",
+                SUPERADMIN_SEED_EMAIL,
+            )
+            return
 
     super_count = get_db().execute(
         "SELECT COUNT(*) AS c FROM users WHERE role = 'superadmin'"
