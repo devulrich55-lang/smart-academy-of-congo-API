@@ -271,12 +271,29 @@ def create_user(profile: dict) -> dict:
     now = datetime.now(timezone.utc).isoformat()
 
     section_id = clean_text(profile.get("sectionId"), 80) or None
-    if role == "etudiant" and not section_id:
+    if role == "etudiant":
         from app.services.reclamation_service import find_section_for_student
 
-        sec = find_section_for_student(universite_locked, profile.get("filiere"))
-        if sec:
-            section_id = sec["id"]
+        if not profile.get("payment"):
+            profile["payment"] = {
+                "status": "pending_verification",
+                "sectionApproval": "pending",
+            }
+        elif isinstance(profile.get("payment"), dict):
+            pay = dict(profile["payment"])
+            if pay.get("sectionApproval") not in ("approved", "rejected", "pending"):
+                pay["sectionApproval"] = "pending"
+            if not pay.get("status"):
+                pay["status"] = "pending_verification"
+            profile["payment"] = pay
+        if not section_id:
+            sec = find_section_for_student(
+                universite_locked,
+                profile.get("filiere"),
+                profile.get("sectionId"),
+            )
+            if sec:
+                section_id = sec["id"]
 
     get_db().execute(
         """INSERT INTO users (
@@ -328,13 +345,76 @@ def create_user(profile: dict) -> dict:
     get_db().commit()
     created = find_user_by_id(user_id)
     if created and role == "etudiant":
+        from app.services.reclamation_service import find_section_for_student
+
+        sec = find_section_for_student(
+            created.get("universite") or "",
+            created.get("filiere"),
+            created.get("sectionId"),
+        )
+        if sec and created.get("sectionId") != sec["id"]:
+            now_link = datetime.now(timezone.utc).isoformat()
+            get_db().execute(
+                "UPDATE users SET section_id = ?, updated_at = ? WHERE id = ?",
+                (sec["id"], now_link, created["id"]),
+            )
+            get_db().commit()
+            created = find_user_by_id(user_id) or created
         _notify_section_pending_inscription(created)
     return created
+
+
+def _resolve_section_head_faculty(actor: dict) -> tuple[str | None, object | None]:
+    from app.services.reclamation_service import find_section_for_student
+    from app.utils.campus_catalog import same_campus
+
+    section_id = actor.get("sectionId")
+    if not section_id:
+        return None, None
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM faculty_sections WHERE id = ?", (section_id,)
+    ).fetchone()
+    if row:
+        return section_id, row
+    campus = _actor_campus(actor)
+    for candidate in db.execute(
+        "SELECT * FROM faculty_sections WHERE active = 1"
+    ).fetchall():
+        if same_campus(campus, candidate["universite"]) and _filiere_matches(
+            actor.get("filiere"), candidate["filiere"] or candidate["name"]
+        ):
+            return candidate["id"], candidate
+    sec = find_section_for_student(campus or "", actor.get("filiere"), section_id)
+    if sec:
+        row = db.execute(
+            "SELECT * FROM faculty_sections WHERE id = ?", (sec["id"],)
+        ).fetchone()
+        if row:
+            return sec["id"], row
+    return section_id, None
+
+
+def _align_section_head_section_id(user: dict) -> dict:
+    if user.get("role") != "section" or _is_rector_actor(user):
+        return user
+    canonical, _row = _resolve_section_head_faculty(user)
+    if not canonical or canonical == user.get("sectionId"):
+        return user
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().execute(
+        "UPDATE users SET section_id = ?, updated_at = ? WHERE id = ?",
+        (canonical, now, user["id"]),
+    )
+    get_db().commit()
+    return find_user_by_id(user["id"]) or {**user, "sectionId": canonical}
 
 
 def user_to_session(user: dict | None) -> dict | None:
     if not user:
         return None
+    if user.get("role") == "section":
+        user = _align_section_head_section_id(user)
     uni = registered_campus(user)
     is_uni = user.get("role") == "universite"
     is_institutional = user.get("role") in ("ministere", "superadmin")
@@ -421,9 +501,10 @@ def _is_section_head_actor(actor: dict) -> bool:
 
 
 def _section_head_section_id(actor: dict) -> str | None:
-    if _is_section_head_actor(actor):
-        return actor.get("sectionId")
-    return None
+    if not _is_section_head_actor(actor):
+        return None
+    canonical, _row = _resolve_section_head_faculty(actor)
+    return canonical
 
 
 def _filiere_matches(a: str | None, b: str | None) -> bool:
@@ -452,7 +533,7 @@ def _student_manageable_by_actor(student: dict, actor: dict) -> bool:
     if actor_role in ("universite", "superadmin") or _is_rector_actor(actor):
         return True
     if actor_role == "section" or (actor_role == "professeur" and _is_section_head_actor(actor)):
-        section_id = _section_head_section_id(actor)
+        section_id, section_row = _resolve_section_head_faculty(actor)
         if not section_id:
             return False
         if student.get("sectionId") == section_id:
@@ -464,12 +545,13 @@ def _student_manageable_by_actor(student: dict, actor: dict) -> bool:
         )
         if resolved and resolved["id"] == section_id:
             return True
-        section_row = get_db().execute(
-            "SELECT filiere, name FROM faculty_sections WHERE id = ?",
-            (section_id,),
-        ).fetchone()
         if section_row and _filiere_matches(
             student.get("filiere"),
+            section_row["filiere"] or section_row["name"],
+        ):
+            return True
+        if resolved and section_row and _filiere_matches(
+            resolved.get("filiere") or resolved.get("name"),
             section_row["filiere"] or section_row["name"],
         ):
             return True
@@ -603,15 +685,34 @@ def create_student_for_section(actor: dict, profile: dict) -> dict:
 
 
 def list_pending_students_for_section(actor: dict) -> list[dict]:
-    rows = get_db().execute(
+    db = get_db()
+    section_id, section_row = _resolve_section_head_faculty(actor)
+    rows = db.execute(
         """SELECT * FROM users WHERE role = 'etudiant'
            ORDER BY created_at DESC LIMIT 2000"""
     ).fetchall()
     out: list[dict] = []
+    now = datetime.now(timezone.utc).isoformat()
+    dirty = False
     for row in rows:
         user = row_to_user(row)
         if not user:
             continue
+        if section_id and section_row and not row["section_id"]:
+            if _filiere_matches(
+                user.get("filiere"),
+                section_row["filiere"] or section_row["name"],
+            ):
+                db.execute(
+                    "UPDATE users SET section_id = ?, updated_at = ? WHERE id = ?",
+                    (section_id, now, row["id"]),
+                )
+                dirty = True
+                user = row_to_user(
+                    db.execute(
+                        "SELECT * FROM users WHERE id = ?", (row["id"],)
+                    ).fetchone()
+                )
         if not _student_manageable_by_actor(user, actor):
             continue
         status = student_section_approval_status(user)
@@ -619,6 +720,8 @@ def list_pending_students_for_section(actor: dict) -> list[dict]:
             continue
         user["sectionApproval"] = status
         out.append(user)
+    if dirty:
+        db.commit()
     return out
 
 
