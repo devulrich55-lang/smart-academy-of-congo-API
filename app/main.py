@@ -150,6 +150,10 @@ def health(request: Request):
             "ok": db_ok,
             "service": "Smart Academy API",
             "version": "1.0.0",
+            "features": {
+                "sectionsApprovalPost": True,
+                "sectionsApprovalPatch": True,
+            },
             "database": "up" if db_ok else "down",
             "storage": {
                 "persistentOnRenderDisk": settings.persistence_on_render_disk,

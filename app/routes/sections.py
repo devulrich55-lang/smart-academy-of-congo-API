@@ -192,6 +192,7 @@ def create_student_route(
 
 
 @router.post("/students/link")
+@router.patch("/students/link")
 @limiter.limit("60/hour")
 def link_student_post_route(
     request: Request,
@@ -219,6 +220,7 @@ def link_student_post_route(
 
 
 @router.post("/students/approval")
+@router.patch("/students/approval")
 @limiter.limit("60/hour")
 def approve_student_post_route(
     request: Request,
