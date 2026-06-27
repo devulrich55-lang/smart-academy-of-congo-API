@@ -1274,6 +1274,17 @@ def create_social_post(
         return {"ok": True, "post": post}
     except ValueError as e:
         _handle_platform_error(e)
+    except Exception as exc:
+        import logging
+
+        logging.exception("create_social_post failed")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "SERVER_ERROR",
+                "message": "Publication impossible — base de données réseau social à migrer.",
+            },
+        ) from exc
 
 
 @router.post("/social/{post_id}/like")

@@ -194,6 +194,7 @@ if settings.frontend_url and settings.frontend_url.rstrip("/") not in settings.a
 if os.getenv("RENDER", "").lower() == "true":
     for _origin in (
         "https://smart-academy-of-congo-dbfm.onrender.com",
+        "https://smart-academy-of-congoat.onrender.com",
         "https://smart-academy-of-congo.onrender.com",
         "https://smart-academy-of-congo-frontend.onrender.com",
     ):

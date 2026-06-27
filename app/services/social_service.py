@@ -195,9 +195,15 @@ def _dm_enabled(universite: str) -> bool:
 
 
 def _row_to_post(row, viewer_email: str = "", comments: list | None = None) -> dict:
+    keys = row.keys() if hasattr(row, "keys") else []
+    likes_raw = (
+        row["likes_json"]
+        if "likes_json" in keys
+        else (row["likes"] if "likes" in keys else None)
+    )
     reactions = _parse_reactions(
-        row["reactions_json"] if "reactions_json" in row.keys() else None,
-        row["likes_json"],
+        row["reactions_json"] if "reactions_json" in keys else None,
+        likes_raw,
     )
     email = (viewer_email or "").lower()
     my_reactions = [k for k, emails in reactions.items() if email in emails]

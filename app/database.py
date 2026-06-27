@@ -1065,6 +1065,24 @@ def _migrate_social_network_v2(conn, backend: str) -> None:
 
     if backend == "mysql":
         cur = conn.cursor()
+        for col, mysql_def, _sqlite_def in (
+            ("hidden", "TINYINT(1) NOT NULL DEFAULT 0"),
+            ("likes_json", "TEXT NULL"),
+        ):
+            try:
+                cur.execute(f"ALTER TABLE social_posts ADD COLUMN {col} {mysql_def}")
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] != 1060:
+                    raise
+        try:
+            cur.execute(
+                "UPDATE social_posts SET likes_json = likes "
+                "WHERE (likes_json IS NULL OR likes_json = '') AND likes IS NOT NULL"
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
         for col, mysql_def, _sqlite_def in post_cols:
             try:
                 cur.execute(f"ALTER TABLE social_posts ADD COLUMN {col} {mysql_def}")
@@ -1137,6 +1155,23 @@ def _migrate_social_network_v2(conn, backend: str) -> None:
                     raise
         cur.close()
         return
+
+    for col, _mysql_def, sqlite_def in (
+        ("hidden", "INTEGER NOT NULL DEFAULT 0"),
+        ("likes_json", "TEXT DEFAULT '[]'"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE social_posts ADD COLUMN {col} {sqlite_def}")
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute(
+            "UPDATE social_posts SET likes_json = likes "
+            "WHERE (likes_json IS NULL OR likes_json = '') AND likes IS NOT NULL"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
     for col, _mysql_def, sqlite_def in post_cols:
         try:
