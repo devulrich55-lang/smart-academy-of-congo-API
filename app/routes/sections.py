@@ -55,6 +55,12 @@ def _require_student_delegate(user: dict = Depends(get_current_user)) -> dict:
     raise HTTPException(status_code=403, detail={"error": "FORBIDDEN", "message": "Accès refusé"})
 
 
+def _student_email_from_body(body: dict | None) -> str | None:
+    payload = body or {}
+    raw = payload.get("email") or payload.get("identifiant")
+    return validate_email_strict(raw)
+
+
 def _approve_student(user: dict, email: str, body: dict) -> dict:
     status = str(body.get("status") or "approved").strip()
     if status == "confirmed":
@@ -199,7 +205,7 @@ def link_student_post_route(
     body: dict,
     user: dict = Depends(_require_student_delegate),
 ):
-    email = validate_email_strict(body.get("email"))
+    email = _student_email_from_body(body)
     if not email:
         raise HTTPException(
             status_code=400,
@@ -227,7 +233,7 @@ def approve_student_post_route(
     body: dict,
     user: dict = Depends(_require_student_delegate),
 ):
-    email = validate_email_strict(body.get("email"))
+    email = _student_email_from_body(body)
     if not email:
         raise HTTPException(
             status_code=400,

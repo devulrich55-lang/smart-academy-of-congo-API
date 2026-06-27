@@ -362,6 +362,7 @@ def user_to_session(user: dict | None) -> dict | None:
             section_approval = "pending"
     return {
         "role": user["role"],
+        "email": user["email"],
         "identifiant": user["email"],
         "userId": user["id"],
         "nom": display_nom,
