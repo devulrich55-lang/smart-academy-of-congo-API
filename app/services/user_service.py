@@ -519,7 +519,7 @@ def link_student_to_section(actor: dict, email: str, profile: dict | None = None
         raise ValueError("INVALID_INPUT")
     student = find_user_by_email(target_email)
     if not student or student.get("role") != "etudiant":
-        raise ValueError("NOT_FOUND")
+        raise ValueError("STUDENT_NOT_FOUND")
     payload = dict(profile or {})
     payload["email"] = target_email
     return _link_existing_student_to_section(actor, student, payload)
@@ -599,6 +599,26 @@ def create_student_for_section(actor: dict, profile: dict) -> dict:
         "createdByRole": actor_role,
     }
     return create_user(profile)
+
+
+def list_pending_students_for_section(actor: dict) -> list[dict]:
+    rows = get_db().execute(
+        """SELECT * FROM users WHERE role = 'etudiant'
+           ORDER BY created_at DESC LIMIT 2000"""
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        user = row_to_user(row)
+        if not user:
+            continue
+        if not _student_manageable_by_actor(user, actor):
+            continue
+        status = student_section_approval_status(user)
+        if status != "pending":
+            continue
+        user["sectionApproval"] = status
+        out.append(user)
+    return out
 
 
 def list_students_for_section(actor: dict) -> list[dict]:
@@ -760,7 +780,7 @@ def set_student_section_approval(
         raise ValueError("INVALID_INPUT")
     student = find_user_by_email(target_email)
     if not student or student.get("role") != "etudiant":
-        raise ValueError("NOT_FOUND")
+        raise ValueError("STUDENT_NOT_FOUND")
 
     section_id = _resolve_section_id_for_student(student, actor)
 

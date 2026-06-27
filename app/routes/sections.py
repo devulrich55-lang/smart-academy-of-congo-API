@@ -10,6 +10,7 @@ from app.services.user_service import (
     find_user_by_email,
     link_student_to_section,
     list_students_for_section,
+    list_pending_students_for_section,
     set_student_section_approval,
     user_to_session,
 )
@@ -29,6 +30,10 @@ ERROR_MAP = {
     "INVALID_PHONE": (400, "Numéro de téléphone mobile congolais invalide"),
     "UNIVERSITY_MISMATCH": (403, "Université incorrecte"),
     "NOT_FOUND": (404, "Section introuvable"),
+    "STUDENT_NOT_FOUND": (
+        404,
+        "Étudiant introuvable sur le serveur — il doit d'abord terminer son inscription en ligne.",
+    ),
     "INVALID_INPUT": (400, "Nom de section et filière requis"),
 }
 
@@ -198,6 +203,14 @@ def create_student_route(
         return {"ok": True, "user": user_to_session(created)}
     except ValueError as e:
         _map_error(e)
+
+
+@router.get("/students/pending")
+def list_pending_students_route(user: dict = Depends(_require_student_delegate)):
+    students = list_pending_students_for_section(user)
+    return {
+        "students": [user_to_session(s) for s in students if s],
+    }
 
 
 @router.get("/students")
