@@ -397,9 +397,21 @@ def user_to_session(user: dict | None) -> dict | None:
     }
 
 
+def _is_rector_actor(actor: dict) -> bool:
+    if actor.get("role") != "section":
+        return False
+    if not actor.get("sectionId"):
+        return True
+    label = " ".join(
+        str(actor.get(k) or "")
+        for k in ("sectionName", "nom", "prenom", "fonction", "nomination")
+    ).lower()
+    return "recteur" in label
+
+
 def _is_section_head_actor(actor: dict) -> bool:
     if actor.get("role") == "section":
-        return bool(actor.get("sectionId"))
+        return bool(actor.get("sectionId")) and not _is_rector_actor(actor)
     return (
         actor.get("role") == "professeur"
         and actor.get("nomination") == "chef_section"
@@ -411,6 +423,72 @@ def _section_head_section_id(actor: dict) -> str | None:
     if _is_section_head_actor(actor):
         return actor.get("sectionId")
     return None
+
+
+def _filiere_matches(a: str | None, b: str | None) -> bool:
+    from app.services.reclamation_service import _norm
+
+    fa, fb = _norm(a), _norm(b)
+    if not fa or not fb:
+        return False
+    if fa == fb or fa in fb or fb in fa:
+        return True
+    fa_tokens = [w for w in fa.split() if len(w) >= 5]
+    fb_tokens = set(fb.split())
+    return bool(fa_tokens and any(t in fb_tokens for t in fa_tokens))
+
+
+def _student_manageable_by_actor(student: dict, actor: dict) -> bool:
+    from app.services.reclamation_service import find_section_for_student
+    from app.utils.campus_catalog import same_campus
+
+    if student.get("role") != "etudiant":
+        return False
+    actor_role = actor.get("role")
+    campus = _actor_campus(actor)
+    if not campus or not same_campus(student.get("universite"), campus):
+        return False
+    if actor_role in ("universite", "superadmin") or _is_rector_actor(actor):
+        return True
+    if actor_role == "section" or (actor_role == "professeur" and _is_section_head_actor(actor)):
+        section_id = _section_head_section_id(actor)
+        if not section_id:
+            return False
+        if student.get("sectionId") == section_id:
+            return True
+        resolved = find_section_for_student(
+            student.get("universite") or "",
+            student.get("filiere"),
+            student.get("sectionId"),
+        )
+        if resolved and resolved["id"] == section_id:
+            return True
+        section_row = get_db().execute(
+            "SELECT filiere, name FROM faculty_sections WHERE id = ?",
+            (section_id,),
+        ).fetchone()
+        if section_row and _filiere_matches(
+            student.get("filiere"),
+            section_row["filiere"] or section_row["name"],
+        ):
+            return True
+    return False
+
+
+def _target_section_id_for_actor(actor: dict, student: dict) -> str | None:
+    from app.services.reclamation_service import find_section_for_student
+
+    head_section_id = _section_head_section_id(actor)
+    if head_section_id:
+        return head_section_id
+    resolved = find_section_for_student(
+        student.get("universite") or "",
+        student.get("filiere"),
+        student.get("sectionId"),
+    )
+    if resolved:
+        return resolved["id"]
+    return student.get("sectionId")
 
 
 def _actor_campus(actor: dict) -> str | None:
@@ -435,12 +513,45 @@ def create_section_head_account(university_actor: dict, profile: dict) -> dict:
     return create_user(profile)
 
 
+def _link_existing_student_to_section(actor: dict, student: dict, profile: dict) -> dict:
+    if not _student_manageable_by_actor(student, actor):
+        raise ValueError("FORBIDDEN")
+    section_id = _target_section_id_for_actor(actor, student)
+    now = datetime.now(timezone.utc).isoformat()
+    payment = student.get("payment") if isinstance(student.get("payment"), dict) else {}
+    if not payment:
+        payment = {
+            "status": "pending_verification",
+            "sectionApproval": "pending",
+        }
+    get_db().execute(
+        """UPDATE users SET section_id = ?, filiere = COALESCE(?, filiere),
+           payment = ?, updated_at = ? WHERE id = ?""",
+        (
+            section_id or student.get("sectionId"),
+            clean_text(profile.get("filiere"), 200) or None,
+            json.dumps(payment),
+            now,
+            student["id"],
+        ),
+    )
+    get_db().commit()
+    return find_user_by_id(student["id"]) or student
+
+
 def create_student_for_section(actor: dict, profile: dict) -> dict:
     actor_role = actor.get("role")
     if actor_role not in ("section", "universite", "professeur"):
         raise ValueError("FORBIDDEN")
     if actor_role == "professeur" and not _is_section_head_actor(actor):
         raise ValueError("FORBIDDEN")
+
+    email = validate_email_strict(profile.get("email")) or clean_email(profile.get("email"))
+    if email:
+        existing = find_user_by_email(email)
+        if existing and existing.get("role") == "etudiant":
+            return _link_existing_student_to_section(actor, existing, profile)
+
     if not profile.get("password") or not validate_password(profile.get("password")):
         raise ValueError("INVALID_PASSWORD")
 
@@ -486,6 +597,16 @@ def list_students_for_section(actor: dict) -> list[dict]:
     actor_role = actor.get("role")
     campus = _actor_campus(actor)
 
+    if _is_rector_actor(actor) and campus:
+        rows = db.execute(
+            """SELECT * FROM users WHERE role = 'etudiant' ORDER BY created_at DESC"""
+        ).fetchall()
+        return [
+            row_to_user(r)
+            for r in rows
+            if r and same_campus(row_to_user(r).get("universite"), campus)
+        ]
+
     if actor_role == "section" or (actor_role == "professeur" and _is_section_head_actor(actor)):
         section_id = _section_head_section_id(actor)
         if not section_id:
@@ -514,6 +635,11 @@ def list_students_for_section(actor: dict) -> list[dict]:
                     row["section_id"],
                 )
                 belongs = bool(resolved and resolved["id"] == section_id)
+            if not belongs:
+                belongs = _filiere_matches(
+                    user.get("filiere"),
+                    section_row["filiere"] or section_row["name"],
+                )
                 if belongs and not row["section_id"]:
                     db.execute(
                         "UPDATE users SET section_id = ?, updated_at = ? WHERE id = ?",
@@ -566,21 +692,9 @@ def _resolve_section_id_for_student(student: dict, actor: dict) -> str | None:
         )
         return sec["id"] if sec else student.get("sectionId")
 
-    allowed = list_students_for_section(actor)
-    student_email = str(student.get("email") or "").strip().lower()
-    if not any(str(s.get("email") or "").strip().lower() == student_email for s in allowed):
+    if not _student_manageable_by_actor(student, actor):
         raise ValueError("FORBIDDEN")
-    head_section_id = _section_head_section_id(actor)
-    if student.get("sectionId"):
-        return student.get("sectionId")
-    if head_section_id:
-        return head_section_id
-    sec = find_section_for_student(
-        student.get("universite") or "",
-        student.get("filiere"),
-        None,
-    )
-    return sec["id"] if sec else None
+    return _target_section_id_for_actor(actor, student)
 
 
 def student_section_approval_status(user: dict | None) -> str:
