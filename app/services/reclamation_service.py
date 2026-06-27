@@ -123,41 +123,115 @@ def _campus_for_actor(actor: dict) -> str:
     )
 
 
+def _filiere_matches(a: str | None, b: str | None) -> bool:
+    fa, fb = _norm(a), _norm(b)
+    if not fa or not fb:
+        return False
+    if fa == fb or fa in fb or fb in fa:
+        return True
+    fa_tokens = [w for w in fa.split() if len(w) >= 5]
+    fb_tokens = set(fb.split())
+    return bool(fa_tokens and any(t in fb_tokens for t in fa_tokens))
+
+
+def _resolve_section_head_faculty_row(actor: dict):
+    section_id = _section_head_section_id(actor)
+    if not section_id:
+        return None, None
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM faculty_sections WHERE id = ?", (section_id,)
+    ).fetchone()
+    if row:
+        return section_id, row
+    from app.utils.campus_catalog import same_campus
+
+    campus = _campus_for_actor(actor)
+    for candidate in db.execute(
+        "SELECT * FROM faculty_sections WHERE active = 1"
+    ).fetchall():
+        if same_campus(campus, candidate["universite"]) and _filiere_matches(
+            actor.get("filiere"), candidate["filiere"] or candidate["name"]
+        ):
+            return candidate["id"], candidate
+    return section_id, None
+
+
+def _reclamation_for_section_head(rec_row, canonical_id: str, section_row) -> bool:
+    if rec_row["section_id"] == canonical_id:
+        return True
+    if not section_row:
+        return False
+    from app.utils.campus_catalog import same_campus
+
+    return same_campus(rec_row["universite"], section_row["universite"]) and _filiere_matches(
+        rec_row["filiere"], section_row["filiere"] or section_row["name"]
+    )
+
+
+def _list_reclamations_for_section_head(
+    actor: dict, limit: int, offset: int
+) -> list[dict]:
+    section_id, section_row = _resolve_section_head_faculty_row(actor)
+    if not section_id:
+        return []
+    canonical_id = section_row["id"] if section_row else section_id
+    db = get_db()
+    if section_row:
+        rows = db.execute(
+            "SELECT * FROM reclamations ORDER BY created_at DESC LIMIT 2000"
+        ).fetchall()
+        matched = [
+            r
+            for r in rows
+            if _reclamation_for_section_head(r, canonical_id, section_row)
+        ]
+        page = matched[offset : offset + limit]
+        return [_row_to_reclamation(r) for r in page]
+    rows = db.execute(
+        """SELECT * FROM reclamations WHERE section_id = ?
+           ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+        (section_id, limit, offset),
+    ).fetchall()
+    return [_row_to_reclamation(r) for r in rows]
+
+
 def list_sections_for_actor(actor: dict) -> list[dict]:
+    from app.utils.campus_catalog import same_campus
+
     role = actor.get("role")
     db = get_db()
     if role == "universite":
         campus = _campus_for_actor(actor)
         rows = db.execute(
-            """SELECT * FROM faculty_sections
-               WHERE universite = ? ORDER BY name""",
-            (campus,),
+            """SELECT * FROM faculty_sections ORDER BY name"""
         ).fetchall()
-        return [_row_to_section(r) for r in rows]
+        return [
+            _row_to_section(r) for r in rows if same_campus(campus, r["universite"])
+        ]
     if role == "assistant":
         campus = _campus_for_actor(actor)
         rows = db.execute(
-            """SELECT * FROM faculty_sections
-               WHERE universite = ? AND active = 1 ORDER BY name""",
-            (campus,),
+            """SELECT * FROM faculty_sections WHERE active = 1 ORDER BY name"""
         ).fetchall()
-        return [_row_to_section(r) for r in rows]
+        return [
+            _row_to_section(r)
+            for r in rows
+            if same_campus(campus, r["universite"])
+        ]
     if role == "section" or (role == "professeur" and _is_section_head_actor(actor)):
-        section_id = _section_head_section_id(actor)
-        if not section_id:
-            return []
-        row = db.execute(
-            "SELECT * FROM faculty_sections WHERE id = ?", (section_id,)
-        ).fetchone()
-        return [_row_to_section(row)] if row else []
+        _sid, section_row = _resolve_section_head_faculty_row(actor)
+        return [_row_to_section(section_row)] if section_row else []
     if role == "etudiant":
         campus = _campus_for_actor(actor)
         rows = db.execute(
-            """SELECT * FROM faculty_sections
-               WHERE universite = ? AND active = 1 ORDER BY name""",
-            (campus,),
+            """SELECT * FROM faculty_sections WHERE active = 1 ORDER BY name"""
         ).fetchall()
-        return [_row_to_section(r) for r in rows]
+        return [
+            _row_to_section(r)
+            for r in rows
+            if same_campus(campus, r["universite"])
+        ]
     return []
 
 
@@ -383,15 +457,7 @@ def list_reclamations_for_actor(
         ).fetchall()
         return [_row_to_reclamation(r) for r in rows]
     if role == "section" or (role == "professeur" and _is_section_head_actor(actor)):
-        section_id = _section_head_section_id(actor)
-        if not section_id:
-            return []
-        rows = db.execute(
-            """SELECT * FROM reclamations WHERE section_id = ?
-               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
-            (section_id, limit, offset),
-        ).fetchall()
-        return [_row_to_reclamation(r) for r in rows]
+        return _list_reclamations_for_section_head(actor, limit, offset)
     if role == "universite":
         campus = _campus_for_actor(actor)
         rows = db.execute(
@@ -416,7 +482,15 @@ def list_reclamations_for_actor(
 def _assert_reclamation_access(actor: dict, rec: dict) -> None:
     role = actor.get("role")
     if role == "section" or (role == "professeur" and _is_section_head_actor(actor)):
-        if rec["sectionId"] != _section_head_section_id(actor):
+        section_id, section_row = _resolve_section_head_faculty_row(actor)
+        if not section_id:
+            raise ValueError("FORBIDDEN")
+        canonical_id = section_row["id"] if section_row else section_id
+        db = get_db()
+        row = db.execute(
+            "SELECT * FROM reclamations WHERE id = ?", (rec["id"],)
+        ).fetchone()
+        if not row or not _reclamation_for_section_head(row, canonical_id, section_row):
             raise ValueError("FORBIDDEN")
         return
     if role == "universite":
@@ -451,7 +525,11 @@ def create_reclamation(actor: dict, data: dict) -> dict:
     if categorie == "autre" and len(categorie_detail) < 3:
         raise ValueError("INVALID_INPUT")
 
-    universite = actor.get("universite") or ""
+    from app.utils.campus_catalog import resolve_campus_id
+
+    universite = resolve_campus_id(actor.get("universite") or "") or (
+        actor.get("universite") or ""
+    )
     section = find_section_for_student(
         universite,
         actor.get("filiere"),
