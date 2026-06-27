@@ -1255,7 +1255,11 @@ def send_social_message(
 async def upload_social_media(
     file: UploadFile = File(...),
     kind: str = Query("photo"),
-    user: dict = Depends(require_roles("etudiant", "professeur", "assistant", "universite", "section")),
+    user: dict = Depends(
+        require_roles(
+            "etudiant", "professeur", "assistant", "universite", "section", "ministere"
+        )
+    ),
 ):
     try:
         content = await file.read()
@@ -1267,7 +1271,9 @@ async def upload_social_media(
 @router.post("/social", status_code=201)
 def create_social_post(
     body: dict,
-    user: dict = Depends(require_roles("etudiant", "professeur", "assistant")),
+    user: dict = Depends(
+        require_roles("etudiant", "professeur", "assistant", "universite", "section", "ministere")
+    ),
 ):
     try:
         post = social_service.create_post(user, body)
