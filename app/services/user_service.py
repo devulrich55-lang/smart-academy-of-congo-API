@@ -188,7 +188,12 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
             profile.get("nom"), 2
         ):
             raise ValueError("INVALID_PROFILE")
-        if not profile.get("sectionId"):
+        is_rector = (
+            str(profile.get("sectionKind") or "").lower() == "recteur"
+            or profile.get("isRector") is True
+            or not profile.get("sectionId")
+        )
+        if not is_rector and not profile.get("sectionId"):
             raise ValueError("INVALID_PROFILE")
         return phone
 

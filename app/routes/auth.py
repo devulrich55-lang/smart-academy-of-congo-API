@@ -10,7 +10,7 @@ from app.services.password_reset_service import (
     reset_password,
     reset_password_with_code,
 )
-from app.services.user_service import create_user, find_user_by_id, user_to_session
+from app.services.user_service import create_user, find_user_by_email, find_user_by_id, user_to_session
 from app.utils.guards import strip_identity_fields
 from app.utils.sanitize import validate_email_strict, validate_password
 
@@ -163,6 +163,98 @@ def register_route(request: Request, body: dict, response: Response):
             profile["payment"] = body["payment"]
         user = create_user(profile)
         tokens = auth_service.issue_tokens(user)
+        _set_auth_cookies(response, tokens["accessToken"], tokens["refreshRaw"])
+        payload = {"ok": True, "session": tokens["session"]}
+        if settings.cross_origin_auth:
+            payload["accessToken"] = tokens["accessToken"]
+            payload["refreshToken"] = tokens["refreshRaw"]
+        return payload
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/provision", status_code=201)
+@limiter.limit("15/hour")
+def provision_route(request: Request, body: dict, response: Response):
+    """Enregistrement serveur pour migration de comptes locaux (rôles campus)."""
+    email = validate_email_strict(body.get("email"))
+    password = body.get("password")
+    if not email or not validate_password(password):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "INVALID_INPUT",
+                "message": "E-mail réel et mot de passe valide requis",
+            },
+        )
+    if not body.get("telephone"):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_PHONE", "message": "Numéro de téléphone mobile requis"},
+        )
+    role = str(body.get("role") or "").strip().lower()
+    if role in ("universite", "ministere", "superadmin"):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "FORBIDDEN",
+                "message": "Ce type de compte doit être créé via le portail administration.",
+            },
+        )
+    if role not in ("etudiant", "professeur", "assistant", "section"):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_PROFILE", "message": "Rôle de compte invalide"},
+        )
+    if find_user_by_email(email):
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "EMAIL_EXISTS", "message": "Cet e-mail est déjà inscrit sur le serveur"},
+        )
+    if role == "section" and not body.get("sectionId"):
+        kind = str(body.get("sectionKind") or "").lower()
+        if kind != "recteur" and not body.get("isRector"):
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "INVALID_PROFILE",
+                    "message": "Identifiant de section requis pour ce compte section",
+                },
+            )
+    try:
+        profile = strip_identity_fields(body)
+        profile["email"] = email
+        profile["password"] = password
+        profile["role"] = role
+        profile["universite"] = body.get("universite") or body.get("universiteLocked")
+        profile["codeUni"] = body.get("codeUni")
+        if isinstance(body.get("payment"), dict):
+            profile["payment"] = body["payment"]
+        elif role == "section":
+            profile["payment"] = {"status": "verified", "method": "migration"}
+        user = create_user(profile)
+        tokens = auth_service.issue_tokens(user)
+        request.state.user = user
+        audit_service.log_audit(
+            request,
+            "provision_account",
+            "user",
+            resource_id=user.get("id"),
+            universite=user.get("universite"),
+            meta={"role": role, "source": "local_migration"},
+        )
         _set_auth_cookies(response, tokens["accessToken"], tokens["refreshRaw"])
         payload = {"ok": True, "session": tokens["session"]}
         if settings.cross_origin_auth:
