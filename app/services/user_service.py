@@ -939,6 +939,142 @@ def set_student_section_approval(
     return updated
 
 
+def staff_section_approval_status(user: dict | None) -> str:
+    if not user or user.get("role") not in ("professeur", "assistant"):
+        return "approved"
+    payment = user.get("payment") if isinstance(user.get("payment"), dict) else {}
+    raw = payment.get("sectionApproval")
+    if raw in ("approved", "rejected", "pending"):
+        return raw
+    if payment.get("status") == "verified" and (
+        payment.get("method") in ("section_delegate", "section_validation", "superadmin_validation")
+        or payment.get("verifiedBy")
+    ):
+        return "approved"
+    if payment.get("status") == "rejected" or payment.get("sectionApproval") == "rejected":
+        return "rejected"
+    return "pending"
+
+
+def _staff_manageable_by_actor(staff: dict, actor: dict) -> bool:
+    from app.utils.campus_catalog import same_campus
+
+    if staff.get("role") not in ("professeur", "assistant"):
+        return False
+    actor_role = actor.get("role")
+    campus = _actor_campus(actor)
+    if not campus or not same_campus(staff.get("universite"), campus):
+        return False
+    if actor_role in ("universite", "superadmin") or _is_rector_actor(actor):
+        return True
+    if actor_role == "section" or (actor_role == "professeur" and _is_section_head_actor(actor)):
+        section_id, section_row = _resolve_section_head_faculty(actor)
+        if section_id and staff.get("sectionId") == section_id:
+            return True
+        if section_row:
+            sec_label = section_row["filiere"] or section_row["name"]
+            for label in (
+                staff.get("filiere"),
+                staff.get("departement"),
+                staff.get("service"),
+            ):
+                if label and _filiere_matches(label, sec_label):
+                    return True
+    return False
+
+
+def set_staff_section_approval(
+    actor: dict, email: str, status: str, reason: str = ""
+) -> dict:
+    actor_role = actor.get("role")
+    if actor_role not in ("section", "universite", "professeur", "superadmin"):
+        raise ValueError("FORBIDDEN")
+    if actor_role == "professeur" and not _is_section_head_actor(actor):
+        raise ValueError("FORBIDDEN")
+    if status not in ("approved", "rejected"):
+        raise ValueError("INVALID_STATUS")
+
+    target_email = validate_email_strict(email) or clean_email(email)
+    if not target_email:
+        raise ValueError("INVALID_INPUT")
+    staff = find_user_by_email(target_email)
+    if not staff or staff.get("role") not in ("professeur", "assistant"):
+        raise ValueError("STAFF_NOT_FOUND")
+
+    if not _staff_manageable_by_actor(staff, actor):
+        raise ValueError("FORBIDDEN")
+
+    section_id = staff.get("sectionId")
+    if actor_role == "section" or (actor_role == "professeur" and _is_section_head_actor(actor)):
+        head_section_id = _section_head_section_id(actor)
+        if head_section_id:
+            section_id = head_section_id
+
+    payment = staff.get("payment") if isinstance(staff.get("payment"), dict) else {}
+    now = datetime.now(timezone.utc).isoformat()
+    if status == "approved":
+        default_method = "superadmin_validation" if actor_role == "superadmin" else "section_validation"
+        payment = {
+            **payment,
+            "status": "verified",
+            "method": payment.get("method") or default_method,
+            "verifiedAt": now,
+            "verifiedBy": actor.get("email") or actor.get("id"),
+            "verifiedByRole": actor_role,
+            "sectionApproval": "approved",
+            "sectionApprovedAt": now,
+        }
+    else:
+        payment = {
+            **payment,
+            "status": "rejected",
+            "sectionApproval": "rejected",
+            "rejectionReason": clean_text(reason, 300) or "",
+            "rejectedAt": now,
+            "rejectedBy": actor.get("email") or actor.get("id"),
+        }
+
+    get_db().execute(
+        """UPDATE users SET section_id = COALESCE(?, section_id), payment = ?, updated_at = ? WHERE id = ?""",
+        (
+            section_id,
+            json.dumps(payment),
+            now,
+            staff["id"],
+        ),
+    )
+    get_db().commit()
+    updated = find_user_by_id(staff["id"])
+    if updated:
+        updated["sectionApproval"] = status
+        _send_inscription_decision_email(
+            updated,
+            status,
+            clean_text(reason, 300) if status == "rejected" else "",
+        )
+    return updated
+
+
+def list_pending_staff_for_section(actor: dict) -> list[dict]:
+    rows = get_db().execute(
+        """SELECT * FROM users WHERE role IN ('professeur','assistant')
+           ORDER BY created_at DESC LIMIT 2000"""
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        user = row_to_user(row)
+        if not user:
+            continue
+        if not _staff_manageable_by_actor(user, actor):
+            continue
+        st = staff_section_approval_status(user)
+        if st != "pending":
+            continue
+        user["sectionApproval"] = st
+        out.append(user)
+    return out
+
+
 def list_students_for_professor(actor: dict) -> list[dict]:
     if actor.get("role") != "professeur":
         raise ValueError("FORBIDDEN")

@@ -9,8 +9,10 @@ from app.services.user_service import (
     create_student_for_section,
     find_user_by_email,
     link_student_to_section,
+    list_pending_staff_for_section,
     list_pending_students_for_section,
     list_students_for_section,
+    set_staff_section_approval,
     set_student_section_approval,
     user_to_session,
 )
@@ -33,6 +35,10 @@ ERROR_MAP = {
     "STUDENT_NOT_FOUND": (
         404,
         "Étudiant introuvable sur le serveur — il doit d'abord terminer son inscription en ligne.",
+    ),
+    "STAFF_NOT_FOUND": (
+        404,
+        "Professeur ou assistant introuvable sur le serveur — il doit d'abord terminer son inscription en ligne.",
     ),
     "INVALID_INPUT": (400, "Nom de section et filière requis"),
 }
@@ -67,6 +73,20 @@ def _approve_student(user: dict, email: str, body: dict) -> dict:
         status = "approved"
     reason = str(body.get("reason") or "").strip()
     return set_student_section_approval(user, email, status, reason)
+
+
+def _staff_email_from_body(body: dict | None) -> str | None:
+    payload = body or {}
+    raw = payload.get("email") or payload.get("identifiant")
+    return validate_email_strict(raw)
+
+
+def _approve_staff(user: dict, email: str, body: dict) -> dict:
+    status = str(body.get("status") or "approved").strip()
+    if status == "confirmed":
+        status = "approved"
+    reason = str(body.get("reason") or "").strip()
+    return set_staff_section_approval(user, email, status, reason)
 
 
 @router.get("")
@@ -264,6 +284,74 @@ def list_pending_students_route(user: dict = Depends(_require_student_delegate))
     students = list_pending_students_for_section(user)
     return {
         "students": [user_to_session(s) for s in students if s],
+    }
+
+
+@router.post("/staff/approval")
+@router.patch("/staff/approval")
+@limiter.limit("60/hour")
+def approve_staff_post_route(
+    request: Request, body: dict, user: dict = Depends(_require_student_delegate)
+):
+    email = _staff_email_from_body(body)
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "INVALID_INPUT", "message": "E-mail professeur ou assistant requis"},
+        )
+    try:
+        updated = _approve_staff(user, email, body or {})
+        audit_service.log_audit(
+            request,
+            "approve_staff_section",
+            "user",
+            resource_id=updated.get("id"),
+            universite=user.get("universite"),
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        code = str(e)
+        if code == "INVALID_STATUS":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": code, "message": "Statut de validation invalide"},
+            )
+        _map_error(e)
+
+
+@router.patch("/staff/{staff_email}/approval")
+@limiter.limit("60/hour")
+def approve_staff_route(
+    staff_email: str,
+    request: Request,
+    body: dict,
+    user: dict = Depends(_require_student_delegate),
+):
+    try:
+        updated = _approve_staff(user, staff_email, body or {})
+        audit_service.log_audit(
+            request,
+            "approve_staff_section",
+            "user",
+            resource_id=updated.get("id"),
+            universite=user.get("universite"),
+        )
+        return {"ok": True, "user": user_to_session(updated)}
+    except ValueError as e:
+        code = str(e)
+        if code == "INVALID_STATUS":
+            raise HTTPException(
+                status_code=400,
+                detail={"error": code, "message": "Statut de validation invalide"},
+            )
+        _map_error(e)
+
+
+@router.get("/staff/pending")
+def list_pending_staff_route(user: dict = Depends(_require_student_delegate)):
+    staff = list_pending_staff_for_section(user)
+    return {
+        "staff": [user_to_session(s) for s in staff if s],
     }
 
 
