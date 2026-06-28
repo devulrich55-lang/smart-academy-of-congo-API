@@ -159,6 +159,8 @@ def register_route(request: Request, body: dict, response: Response):
         profile["role"] = body.get("role")
         profile["universite"] = body.get("universite")
         profile["codeUni"] = body.get("codeUni")
+        if isinstance(body.get("payment"), dict):
+            profile["payment"] = body["payment"]
         user = create_user(profile)
         tokens = auth_service.issue_tokens(user)
         _set_auth_cookies(response, tokens["accessToken"], tokens["refreshRaw"])

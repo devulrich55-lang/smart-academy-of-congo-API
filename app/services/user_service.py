@@ -271,9 +271,7 @@ def create_user(profile: dict) -> dict:
     now = datetime.now(timezone.utc).isoformat()
 
     section_id = clean_text(profile.get("sectionId"), 80) or None
-    if role == "etudiant":
-        from app.services.reclamation_service import find_section_for_student
-
+    if role in ("etudiant", "professeur", "assistant"):
         if not profile.get("payment"):
             profile["payment"] = {
                 "status": "pending_verification",
@@ -286,6 +284,9 @@ def create_user(profile: dict) -> dict:
             if not pay.get("status"):
                 pay["status"] = "pending_verification"
             profile["payment"] = pay
+    if role == "etudiant":
+        from app.services.reclamation_service import find_section_for_student
+
         if not section_id:
             sec = find_section_for_student(
                 universite_locked,
