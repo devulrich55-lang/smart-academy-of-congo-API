@@ -8,7 +8,7 @@ from app.deps import get_current_user, require_roles
 from app.rate_limit import limiter
 from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, live_service, meeting_service, orientation_service, platform_service, social_service
 from app.services import reclamation_service
-from app.services.user_service import get_campus_branding, list_students_for_professor
+from app.services.user_service import get_campus_branding, list_students_for_professor, public_platform_stats
 from app.utils.campus_catalog import catalog_payload, get_by_id, resolve_campus_id
 from app.utils.guards import assert_submission_access, pick_fields, strip_identity_fields
 from app.utils.pagination import clamp_page
@@ -123,6 +123,12 @@ def verify_diploma_route(body: dict, request: Request):
 def campus_catalog_route():
     """Catalogue national des établissements — public, aligné sac-universities.js."""
     return catalog_payload()
+
+
+@router.get("/public-stats")
+def public_stats_route():
+    """Compteurs publics page d'accueil — universités partenaires et inscriptions."""
+    return public_platform_stats()
 
 
 @router.get("/campus-catalog/resolve")

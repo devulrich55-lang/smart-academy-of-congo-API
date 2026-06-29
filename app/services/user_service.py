@@ -1686,6 +1686,26 @@ def platform_accounts_summary(actor: dict) -> dict:
     return {"total": len(accounts), "byRole": by_role}
 
 
+def public_platform_stats() -> dict:
+    """Statistiques publiques pour la page d'accueil — sans authentification."""
+    db = get_db()
+    partner_row = db.execute(
+        "SELECT COUNT(*) AS n FROM users WHERE role = 'universite'"
+    ).fetchone()
+    students_row = db.execute(
+        "SELECT COUNT(*) AS n FROM users WHERE role = 'etudiant'"
+    ).fetchone()
+    users_row = db.execute(
+        "SELECT COUNT(*) AS n FROM users WHERE role IN "
+        "('superadmin','ministere','universite','etudiant','professeur','assistant','section')"
+    ).fetchone()
+    return {
+        "partnerUniversities": int(partner_row["n"] or 0),
+        "registeredStudents": int(students_row["n"] or 0),
+        "registeredUsers": int(users_row["n"] or 0),
+    }
+
+
 def _purge_user_records(target_email: str, user_id: str) -> None:
     db = get_db()
     for stmt, params in (
