@@ -32,6 +32,8 @@ ERROR_MAP = {
     "UNIVERSITY_MISMATCH": (403, "Université incorrecte : utilisez celle choisie à l'inscription"),
     "CODE_UNI_MISMATCH": (403, "Code établissement incorrect"),
     "INVALID_PROFILE": (400, "Profil invalide ou informations non fiables"),
+    "INVALID_COUNTRY": (400, "Pays partenaire invalide ou manquant"),
+    "COUNTRY_MISMATCH": (403, "Ce compte n'est pas rattaché au pays sélectionné"),
     "INVALID_REFRESH": (401, "Session expirée, reconnectez-vous"),
     "INVALID_RESET_TOKEN": (400, "Lien de réinitialisation invalide ou expiré"),
     "INVALID_PASSWORD": (400, "Mot de passe invalide (8+ caractères, lettre + chiffre, sans espace)"),

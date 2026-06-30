@@ -12,6 +12,7 @@ from app.services.user_service import (
     record_failed_login,
     user_to_session,
     verify_password,
+    _resolve_country_code,
 )
 from app.utils.campus_catalog import registered_campus, same_campus
 from app.utils.tokens import (
@@ -91,6 +92,12 @@ def login(
         and options["codeUni"].strip().upper() != user["codeUni"].strip().upper()
     ):
         raise ValueError("CODE_UNI_MISMATCH")
+
+    if options.get("countryCode") and user["role"] == "ministere":
+        expected = str(options["countryCode"]).strip().upper()
+        actual = _resolve_country_code(user) or ""
+        if actual and expected and actual != expected:
+            raise ValueError("COUNTRY_MISMATCH")
 
     if is_account_locked(user):
         raise ValueError("ACCOUNT_LOCKED")

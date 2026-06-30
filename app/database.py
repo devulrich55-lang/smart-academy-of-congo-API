@@ -403,6 +403,24 @@ def _migrate_document_views(conn, backend: str) -> None:
         pass
 
 
+def _migrate_users_country_code_column(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN country_code CHAR(2) NULL")
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
+        cur.close()
+        return
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN country_code TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_users_logo_url_column(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1510,6 +1528,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_reset_code_column(conn, "mysql")
     _migrate_users_classe_column(conn, "mysql")
     _migrate_users_logo_url_column(conn, "mysql")
+    _migrate_users_country_code_column(conn, "mysql")
     _migrate_home_news_table(conn, "mysql")
     _migrate_home_news_media_columns(conn, "mysql")
     _migrate_home_news_views(conn, "mysql")
@@ -1643,6 +1662,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_users_section_role_sqlite(conn)
     _migrate_users_admin_roles_sqlite(conn)
     _migrate_users_logo_url_column(conn, "sqlite")
+    _migrate_users_country_code_column(conn, "sqlite")
     _migrate_home_news_table(conn, "sqlite")
     _migrate_home_news_media_columns(conn, "sqlite")
     _migrate_home_news_views(conn, "sqlite")
@@ -1722,6 +1742,7 @@ def row_to_user(row: Any | None) -> dict[str, Any] | None:
         "classe": row["classe"] if "classe" in keys else None,
         "nomination": row["nomination"] if "nomination" in keys else None,
         "logoUrl": row["logo_url"] if "logo_url" in keys else None,
+        "countryCode": row["country_code"] if "country_code" in keys else None,
         "createdAt": row["created_at"],
     }
 

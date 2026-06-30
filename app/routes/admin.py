@@ -29,6 +29,7 @@ ERROR_MAP = {
     "NOT_FOUND": (404, "Compte introuvable"),
     "INVALID_INPUT": (400, "E-mail invalide"),
     "INVALID_PROFILE": (400, "Profil invalide"),
+    "INVALID_COUNTRY": (400, "Pays partenaire invalide ou manquant"),
     "INVALID_PASSWORD": (400, "Mot de passe invalide (8+ caractères, lettre + chiffre)"),
     "CANNOT_DELETE_SELF": (400, "Vous ne pouvez pas supprimer votre propre compte"),
     "FORBIDDEN_TARGET": (403, "Suppression non autorisée pour ce compte"),

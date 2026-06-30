@@ -25,6 +25,46 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 BCRYPT_ROUNDS = 12
 LOGO_URL_MAX_LEN = 4_000_000
 
+PARTNER_COUNTRY_CODES = frozenset(
+    {
+        "CD",
+        "CG",
+        "GA",
+        "CM",
+        "TD",
+        "CF",
+        "GQ",
+        "ST",
+        "BI",
+        "DJ",
+        "SN",
+        "CI",
+        "BJ",
+        "TG",
+        "BF",
+        "NE",
+        "ML",
+        "MG",
+    }
+)
+
+
+def _resolve_country_code(profile: dict | None) -> str | None:
+    if not profile:
+        return None
+    raw = profile.get("countryCode") or profile.get("country_code")
+    if not raw:
+        return None
+    cc = str(raw).strip().upper()
+    return cc if cc in PARTNER_COUNTRY_CODES else None
+
+
+def _require_country_code(profile: dict) -> str:
+    cc = _resolve_country_code(profile)
+    if not cc:
+        raise ValueError("INVALID_COUNTRY")
+    return cc
+
 
 def _clean_logo_url(val: object) -> str | None:
     if not val or not isinstance(val, str):
@@ -307,8 +347,8 @@ def create_user(profile: dict) -> dict:
           filiere, niveau, matricule, date_naissance, departement, grade, service,
           fonction, num_employe, num_assist, nom_universite, sigle, ville, adresse,
           nb_etudiants, site_web, responsable, code_uni, cours_classes, payment,
-          inscription_fee, classe, section_id, logo_url, created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          inscription_fee, classe, section_id, logo_url, country_code, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             user_id,
             email,
@@ -344,6 +384,7 @@ def create_user(profile: dict) -> dict:
             clean_text(profile.get("classe"), 150) or None,
             section_id,
             _clean_logo_url(profile.get("logoUrl")),
+            _resolve_country_code(profile),
             now,
             now,
         ),
@@ -474,6 +515,7 @@ def user_to_session(user: dict | None) -> dict | None:
         "fonction": user.get("fonction"),
         "nomUniversite": user.get("nomUniversite"),
         "logoUrl": user.get("logoUrl"),
+        "countryCode": user.get("countryCode"),
         "campusTariffs": user.get("campusTariffs"),
         "campusAcademicFees": user.get("campusAcademicFees"),
         "universityFees": user.get("universityFees"),
@@ -1402,8 +1444,24 @@ def _institutional_row(user: dict) -> dict:
         "ville": user.get("ville"),
         "telephone": user.get("telephone"),
         "logoUrl": user.get("logoUrl"),
+        "countryCode": _institutional_country_code(user) or None,
         "createdAt": user.get("createdAt"),
     }
+
+
+def _institutional_country_code(user: dict) -> str:
+    cc = _resolve_country_code(user)
+    if cc:
+        return cc
+    if user.get("role") == "universite":
+        campus = registered_campus(user)
+        if campus:
+            from app.utils.campus_catalog import get_by_id
+
+            item = get_by_id(campus)
+            if item and item.get("countryCode"):
+                return str(item["countryCode"]).upper()
+    return ""
 
 
 def list_institutional_admins(actor: dict) -> list[dict]:
@@ -1420,7 +1478,17 @@ def list_institutional_admins(actor: dict) -> list[dict]:
             "SELECT * FROM users WHERE role IN ('superadmin','ministere','universite') "
             "ORDER BY role, email"
         ).fetchall()
-    return [_institutional_row(row_to_user(r)) for r in rows]
+    items = [_institutional_row(row_to_user(r)) for r in rows]
+    if actor_role == "ministere":
+        actor_cc = _resolve_country_code(actor) or ""
+        if actor_cc:
+            items = [
+                a
+                for a in items
+                if a.get("role") not in ("ministere", "universite")
+                or str(a.get("countryCode") or "").upper() == actor_cc
+            ]
+    return items
 
 
 def get_campus_branding(campus_code: str) -> dict | None:
@@ -1513,6 +1581,7 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         fonction = clean_text(profile.get("fonction"), 50)
         if fonction:
             payload["fonction"] = fonction
+        payload["countryCode"] = _require_country_code(profile)
     if role == "universite":
         campus = normalize_profile_campus(
             {
@@ -1534,6 +1603,7 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
                 "logoUrl": profile.get("logoUrl"),
             }
         )
+        payload["countryCode"] = _require_country_code(profile)
     created = create_user(payload)
     if created and role == "universite":
         faculty_sections = profile.get("facultySections") or []
