@@ -39,7 +39,7 @@ ERROR_MAP = {
     "INVALID_PASSWORD": (400, "Mot de passe invalide (8+ caractères, lettre + chiffre, sans espace)"),
     "EMAIL_NOT_CONFIGURED": (
         503,
-        "L'envoi d'e-mails n'est pas configuré sur le serveur. Contactez contact@smartacademy.cd.",
+        "L'envoi d'e-mails n'est pas configuré sur le serveur. Contactez contact@evosmartuni.com.",
     ),
     "EMAIL_SEND_FAILED": (
         503,

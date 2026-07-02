@@ -9,7 +9,7 @@ from app.config import settings
 from app.utils.sanitize import clean_text
 
 _WORD_RE = re.compile(r"^[\w' -]{1,80}$", re.UNICODE)
-_WIKI_UA = "SmartAcademyCongo/1.0 (https://smart-academy-of-congo.onrender.com; dictionnaire)"
+_WIKI_UA = "Evo-smartUni/1.0 (https://evosmartuni.com; dictionnaire)"
 
 LANGUAGES = {
     "fr": {"id": "fr", "label": "Français", "native": "Français"},

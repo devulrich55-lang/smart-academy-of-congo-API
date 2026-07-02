@@ -1,1 +1,1 @@
-# Smart Academy of Congo — API Python (FastAPI)
+# Evo-smartUni — API Python (FastAPI)

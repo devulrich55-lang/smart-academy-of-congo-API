@@ -70,7 +70,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Smart Academy API",
+    title="Evo-smartUni API",
     version="1.0.0",
     lifespan=lifespan,
     docs_url=None if settings.is_prod else "/docs",
@@ -148,7 +148,7 @@ def health(request: Request):
     if settings.is_prod:
         return {
             "ok": db_ok,
-            "service": "Smart Academy API",
+            "service": settings.platform_name + " API",
             "version": "1.0.0",
             "features": {
                 "sectionsApprovalPost": True,
@@ -168,7 +168,7 @@ def health(request: Request):
 
     return {
         "ok": db_ok,
-        "service": "Smart Academy API",
+        "service": settings.platform_name + " API",
         "version": "1.0.0",
         "runtime": "python",
         "database": "up" if db_ok else "down",

@@ -98,7 +98,7 @@ def _send_inscription_decision_email(student: dict, status: str, reason: str = "
     if status == "approved":
         title = "Inscription validée"
         message = (
-            f"Bonjour {name}, votre inscription étudiant sur Smart Academy of Congo "
+            f"Bonjour {name}, votre inscription étudiant sur {settings.platform_name} "
             f"a été validée ({campus}, filière {filiere}). "
             "Connectez-vous avec votre e-mail ou matricule et votre mot de passe."
         )

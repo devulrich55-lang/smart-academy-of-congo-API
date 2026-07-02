@@ -8,6 +8,14 @@ from app.config import settings
 logger = logging.getLogger("sac.email")
 
 
+def _brand() -> str:
+    return getattr(settings, "platform_name", None) or "Evo-smartUni"
+
+
+def _brand_short() -> str:
+    return getattr(settings, "platform_short", None) or "EvoSU"
+
+
 def smtp_configured() -> bool:
     return bool(
         settings.smtp_host
@@ -42,11 +50,12 @@ def send_password_reset_email(
     reset_code: str,
 ) -> bool:
     """Envoie le code et le lien par e-mail via Gmail/SMTP. Le code n'est visible que dans l'e-mail."""
-    subject = "Votre code Smart Academy — réinitialisation du mot de passe"
+    brand = _brand()
+    subject = f"Votre code {_brand_short()} — réinitialisation du mot de passe"
     greeting = display_name or "Utilisateur"
     text_body = (
         f"Bonjour {greeting},\n\n"
-        "Vous avez demandé la réinitialisation de votre mot de passe sur Smart Academy of Congo.\n\n"
+        f"Vous avez demandé la réinitialisation de votre mot de passe sur {brand}.\n\n"
         f"Votre code de réinitialisation : {reset_code}\n"
         f"(valide {settings.reset_token_hours} h)\n\n"
         "Ou cliquez sur ce lien :\n"
@@ -54,14 +63,14 @@ def send_password_reset_email(
         "Sur la page de réinitialisation, entrez ce code avec votre e-mail "
         "ou utilisez directement le lien.\n\n"
         "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.\n\n"
-        "— Smart Academy of Congo"
+        f"— {brand}"
     )
     html_body = f"""<!DOCTYPE html>
 <html lang="fr">
 <body style="font-family:Arial,sans-serif;line-height:1.6;color:#1a2b3c;max-width:560px;margin:0 auto;padding:24px;">
   <h2 style="color:#0c3d6e;">Réinitialisation du mot de passe</h2>
   <p>Bonjour <strong>{greeting}</strong>,</p>
-  <p>Vous avez demandé la réinitialisation de votre mot de passe sur <strong>Smart Academy of Congo</strong>.</p>
+  <p>Vous avez demandé la réinitialisation de votre mot de passe sur <strong>{brand}</strong>.</p>
   <p style="font-size:15px;color:#1a2b3c;">Votre code de réinitialisation :</p>
   <p style="font-size:32px;font-weight:700;letter-spacing:6px;color:#0c3d6e;margin:16px 0;">{reset_code}</p>
   <p style="font-size:14px;color:#5a6d7e;">Ce code expire dans {settings.reset_token_hours} heure(s).</p>
@@ -73,7 +82,7 @@ def send_password_reset_email(
   <p style="font-size:14px;color:#5a6d7e;">Si le bouton ne fonctionne pas, copiez ce lien :<br>{reset_url}</p>
   <p style="font-size:14px;color:#5a6d7e;">Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.</p>
   <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
-  <p style="font-size:12px;color:#5a6d7e;">Smart Academy of Congo</p>
+  <p style="font-size:12px;color:#5a6d7e;">{brand}</p>
 </body>
 </html>"""
 
@@ -135,17 +144,19 @@ def send_platform_notification_email(
     if not smtp_configured() or not to_email:
         return False
 
-    subject = f"Smart Academy — {title}"
+    brand = _brand()
+    short = _brand_short()
+    subject = f"{short} — {title}"
     text_body = (
         f"{title}\n\n{message}\n\n"
         + (f"Ouvrir : {action_url}\n\n" if action_url else "")
-        + "— Smart Academy of Congo\n"
-        "Vous recevez cet e-mail car vous êtes inscrit sur la plateforme SAC."
+        + f"— {brand}\n"
+        f"Vous recevez cet e-mail car vous êtes inscrit sur la plateforme {brand}."
     )
     link_html = (
         f'<p style="margin:20px 0;"><a href="{action_url}" '
         'style="background:#0084ff;color:#fff;padding:12px 22px;border-radius:8px;'
-        'text-decoration:none;display:inline-block;">Voir sur SAC</a></p>'
+        f'text-decoration:none;display:inline-block;">Voir sur {short}</a></p>'
         if action_url
         else ""
     )
@@ -155,7 +166,7 @@ def send_platform_notification_email(
   <p>{message}</p>
   {link_html}
   <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
-  <p style="font-size:12px;color:#5a6d7e;">Smart Academy of Congo — notification campus</p>
+  <p style="font-size:12px;color:#5a6d7e;">{brand} — notification campus</p>
 </body></html>"""
 
     msg = MIMEMultipart("alternative")

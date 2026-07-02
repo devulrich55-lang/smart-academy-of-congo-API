@@ -484,7 +484,7 @@ def build_university_fees_for_student(
     paid_date = paid_date[:10] if paid_date else "—"
     rows = [
         {
-            "label": "Frais d'inscription (Smart Academy)",
+            "label": f"Frais d'inscription ({settings.platform_name})",
             "term": f"Année {year}-{year + 1}",
             "amount": round(float(inscription_amount), 2),
             "amountCdf": round(float(inscription_amount) * cdf_per_usd),

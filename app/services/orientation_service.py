@@ -134,7 +134,7 @@ def _llm_advice(actor: dict, interests: str) -> dict | None:
     name = f"{prenom} {nom}".strip() or "Étudiant"
 
     system = (
-        "Tu es l'assistant d'orientation académique de Smart Academy of Congo (universités en RDC). "
+        f"Tu es l'assistant d'orientation académique de {settings.platform_name} (universités en RDC). "
         "Réponds UNIQUEMENT en JSON valide, sans markdown, avec les clés : "
         "message (string, 2-3 phrases en français), recommendedFilieres (array de 3 strings), "
         "suggestedInternships (array de 3 strings), skillsToDevelop (array de 3 strings), "

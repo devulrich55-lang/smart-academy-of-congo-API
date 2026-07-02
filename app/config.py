@@ -77,6 +77,8 @@ class Settings:
     )
     frontend_root: Path = ROOT.parent
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5500").rstrip("/")
+    platform_name: str = os.getenv("PLATFORM_NAME", "Evo-smartUni").strip() or "Evo-smartUni"
+    platform_short: str = os.getenv("PLATFORM_SHORT", "EvoSU").strip() or "EvoSU"
     reset_token_hours: int = int(os.getenv("RESET_TOKEN_HOURS", "1"))
     gmail_user: str = os.getenv("GMAIL_USER", "").strip()
     gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "").strip()
@@ -184,7 +186,18 @@ if settings.gmail_user and settings.gmail_app_password:
         settings.smtp_use_tls = False
 
 if not settings.email_from:
-    settings.email_from = "noreply@smartacademy.cd"
+    settings.email_from = "noreply@evosmartuni.com"
+
+# Liens e-mails : domaine public Evo-smartUni (évite anciennes URLs Render dans les mails)
+_public_url = os.getenv("EVOSU_PUBLIC_URL", "").strip().rstrip("/")
+if _public_url:
+    settings.frontend_url = _public_url
+elif os.getenv("RENDER", "").lower() == "true":
+    _front = settings.frontend_url or ""
+    if "evosmartuni.com" not in _front and (
+        "smart-academy" in _front or _front.endswith(".onrender.com")
+    ):
+        settings.frontend_url = "https://evosmartuni.com"
 
 if settings.frontend_url and settings.frontend_url.rstrip("/") not in settings.allowed_origins:
     settings.allowed_origins.append(settings.frontend_url.rstrip("/"))
