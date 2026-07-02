@@ -1188,6 +1188,40 @@ def list_social_hashtags(user: dict = Depends(get_current_user)):
         _handle_platform_error(e)
 
 
+@router.get("/social/study-groups")
+def list_social_study_groups(user: dict = Depends(get_current_user)):
+    try:
+        return {"groups": social_service.list_study_groups(user)}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social/study-groups", status_code=201)
+def create_social_study_group(
+    body: dict,
+    user: dict = Depends(
+        require_roles("etudiant", "professeur", "assistant", "universite", "section", "ministere")
+    ),
+):
+    try:
+        group = social_service.create_study_group(user, body)
+        return {"ok": True, "group": group}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
+@router.post("/social/study-groups/{group_id}/join")
+def join_social_study_group(
+    group_id: str,
+    user: dict = Depends(get_current_user),
+):
+    try:
+        group = social_service.join_study_group(user, group_id)
+        return {"ok": True, "group": group}
+    except ValueError as e:
+        _handle_platform_error(e)
+
+
 @router.get("/social/settings")
 def get_social_settings(user: dict = Depends(get_current_user)):
     try:

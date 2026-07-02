@@ -156,6 +156,53 @@ def _group_key(audience: str, filiere: str, niveau: str) -> str:
     return "campus"
 
 
+def _study_group_members(row) -> list[str]:
+    members = _json_load(row["members_json"] if "members_json" in row.keys() else None, [])
+    if not isinstance(members, list):
+        return []
+    return list(dict.fromkeys(str(x).lower() for x in members if x))
+
+
+def _is_study_group_member(row, email: str) -> bool:
+    return (email or "").lower() in _study_group_members(row)
+
+
+def _get_study_group_row(group_id: str, campus: str):
+    row = get_db().execute(
+        "SELECT * FROM social_study_groups WHERE id = ? AND universite = ?",
+        (clean_text(group_id, 80), campus),
+    ).fetchone()
+    return row
+
+
+def _study_group_visible_for_actor(group_key: str, actor: dict) -> bool:
+    if not group_key or not str(group_key).startswith("study:"):
+        return True
+    gid = str(group_key).split(":", 1)[1]
+    campus = _campus(actor)
+    row = _get_study_group_row(gid, campus)
+    if not row:
+        return False
+    return _is_study_group_member(row, _email(actor))
+
+
+def _row_to_study_group(row, viewer_email: str = "") -> dict:
+    members = _study_group_members(row)
+    email = (viewer_email or "").lower()
+    return {
+        "id": row["id"],
+        "universite": row["universite"] or "",
+        "name": row["name"] or "",
+        "subject": (row["subject"] if "subject" in row.keys() else None) or "",
+        "description": (row["description"] if "description" in row.keys() else None) or "",
+        "creatorEmail": row["creator_email"] or "",
+        "creatorName": (row["creator_name"] if "creator_name" in row.keys() else None) or "",
+        "memberCount": len(members),
+        "isMember": email in members,
+        "createdAt": row["created_at"] or "",
+    }
+
+
 def _notify(
     universite: str,
     recipient: str,
@@ -264,6 +311,9 @@ def _visible_for_actor(row, actor: dict) -> bool:
             return False
         if post_niv and actor_niv and post_niv != actor_niv:
             return False
+    gk = (row["group_key"] if "group_key" in row.keys() else "") or ""
+    if gk.startswith("study:") and not _study_group_visible_for_actor(gk, actor):
+        return False
     return True
 
 
@@ -393,13 +443,16 @@ def list_posts(actor: dict, filters: dict | None = None) -> list[dict]:
         if group:
             gk = (row["group_key"] if "group_key" in row.keys() else "") or ""
             aud = row["audience"] or "campus"
-            if group == "filiere" and aud != "filiere":
+            if group.startswith("study:"):
+                if gk.lower() != group.lower():
+                    continue
+            elif group == "filiere" and aud != "filiere":
                 continue
-            if group == "promotion" and aud != "promotion":
+            elif group == "promotion" and aud != "promotion":
                 continue
-            if group == "campus" and aud != "campus":
+            elif group == "campus" and aud != "campus":
                 continue
-            if gk and group not in gk.lower() and gk.lower() not in group:
+            elif gk and group not in gk.lower() and gk.lower() not in group:
                 if group not in (aud, gk.lower()):
                     continue
         visible.append(row)
@@ -485,6 +538,16 @@ def create_post(actor: dict, data: dict) -> dict:
     if post_type == "event" and not event_at:
         raise ValueError("INVALID_INPUT")
     email = _email(actor)
+    study_group_id = clean_text(data.get("studyGroupId"), 80)
+    group_key = _group_key(audience, filiere, niveau)
+    if study_group_id:
+        sg_row = _get_study_group_row(study_group_id, campus)
+        if not sg_row:
+            raise ValueError("NOT_FOUND")
+        if not _is_study_group_member(sg_row, email):
+            raise ValueError("FORBIDDEN")
+        group_key = f"study:{study_group_id}"
+        audience = "campus"
     now = _now()
     item_id = uid("soc")
     get_db().execute(
@@ -504,7 +567,7 @@ def create_post(actor: dict, data: dict) -> dict:
             audience,
             filiere,
             niveau,
-            _group_key(audience, filiere, niveau),
+            group_key,
             post_type,
             media_url,
             clean_text(data.get("mediaName"), 200),
@@ -842,3 +905,75 @@ def send_message(actor: dict, data: dict) -> dict:
         "mine": True,
         "createdAt": now,
     }
+
+
+def list_study_groups(actor: dict) -> list[dict]:
+    campus = _campus(actor)
+    if not campus:
+        return []
+    email = _email(actor)
+    rows = get_db().execute(
+        """SELECT * FROM social_study_groups
+           WHERE universite = ?
+           ORDER BY created_at DESC
+           LIMIT 80""",
+        (campus,),
+    ).fetchall()
+    return [_row_to_study_group(row, email) for row in rows if same_campus(row["universite"], campus)]
+
+
+def create_study_group(actor: dict, data: dict) -> dict:
+    if actor.get("role") not in POST_ROLES.union(MODERATE_ROLES):
+        raise ValueError("FORBIDDEN")
+    campus = _campus(actor)
+    if not campus:
+        raise ValueError("INVALID_INPUT")
+    name = clean_text(data.get("name"), 120)
+    if len(name) < 2:
+        raise ValueError("INVALID_INPUT")
+    subject = clean_text(data.get("subject"), 120)
+    description = clean_text(data.get("description"), 500)
+    email = _email(actor)
+    gid = uid("sg")
+    now = _now()
+    members = [email]
+    get_db().execute(
+        """INSERT INTO social_study_groups
+           (id, universite, name, subject, description, creator_email, creator_name, members_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            gid,
+            campus,
+            name,
+            subject,
+            description,
+            email,
+            _author_name(actor),
+            json.dumps(members),
+            now,
+        ),
+    )
+    get_db().commit()
+    row = get_db().execute("SELECT * FROM social_study_groups WHERE id = ?", (gid,)).fetchone()
+    return _row_to_study_group(row, email)
+
+
+def join_study_group(actor: dict, group_id: str) -> dict:
+    campus = _campus(actor)
+    if not campus:
+        raise ValueError("INVALID_INPUT")
+    gid = clean_text(group_id, 80)
+    row = _get_study_group_row(gid, campus)
+    if not row:
+        raise ValueError("NOT_FOUND")
+    email = _email(actor)
+    members = _study_group_members(row)
+    if email not in members:
+        members.append(email)
+        get_db().execute(
+            "UPDATE social_study_groups SET members_json = ? WHERE id = ?",
+            (json.dumps(members), gid),
+        )
+        get_db().commit()
+        row = get_db().execute("SELECT * FROM social_study_groups WHERE id = ?", (gid,)).fetchone()
+    return _row_to_study_group(row, email)
