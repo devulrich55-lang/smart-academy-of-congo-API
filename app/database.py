@@ -1394,6 +1394,64 @@ def _migrate_social_study_groups_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_monitor_incidents_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS monitor_incidents (
+                  id VARCHAR(80) PRIMARY KEY,
+                  severity VARCHAR(20) NOT NULL,
+                  service VARCHAR(40) NOT NULL,
+                  title VARCHAR(200) NOT NULL,
+                  message TEXT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'open',
+                  resolved_at VARCHAR(40) NULL,
+                  resolved_by VARCHAR(255) NULL,
+                  meta_json TEXT NULL,
+                  created_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_monitor_incidents_status ON monitor_incidents(status, created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS monitor_incidents (
+              id TEXT PRIMARY KEY,
+              severity TEXT NOT NULL,
+              service TEXT NOT NULL,
+              title TEXT NOT NULL,
+              message TEXT,
+              status TEXT NOT NULL DEFAULT 'open',
+              resolved_at TEXT,
+              resolved_by TEXT,
+              meta_json TEXT,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_monitor_incidents_status ON monitor_incidents(status, created_at DESC);
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_mobile_money_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1599,6 +1657,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_social_posts_table(conn, "mysql")
     _migrate_social_network_v2(conn, "mysql")
     _migrate_social_study_groups_table(conn, "mysql")
+    _migrate_monitor_incidents_table(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
@@ -1734,6 +1793,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_social_posts_table(conn, "sqlite")
     _migrate_social_network_v2(conn, "sqlite")
     _migrate_social_study_groups_table(conn, "sqlite")
+    _migrate_monitor_incidents_table(conn, "sqlite")
     _migrate_mobile_money_table(conn, "sqlite")
     _migrate_live_sessions_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")

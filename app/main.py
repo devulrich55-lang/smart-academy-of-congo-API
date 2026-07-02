@@ -34,7 +34,7 @@ from app.middleware.security import (
 
 from app.rate_limit import limiter
 
-from app.routes import admin, auth, documents, nominations, payments, platform, reclamations, sections, tariffs, webrtc
+from app.routes import admin, auth, documents, monitor, nominations, payments, platform, reclamations, sections, tariffs, webrtc
 
 from app.seed import seed_demo_sections_if_missing, seed_if_empty, seed_institutional_admins_if_missing
 
@@ -215,6 +215,8 @@ app.include_router(reclamations.router, prefix="/api")
 app.include_router(nominations.router, prefix="/api")
 
 app.include_router(admin.router, prefix="/api")
+
+app.include_router(monitor.router, prefix="/api")
 
 
 
