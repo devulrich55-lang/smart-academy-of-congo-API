@@ -20,6 +20,16 @@ except ImportError:
     psutil = None
 
 SEVERITY_ORDER = {"critical": 3, "warning": 2, "info": 1}
+SECURITY_ACTIONS = frozenset(
+    {
+        "login_failed",
+        "illegal_access",
+        "access_denied",
+        "account_locked",
+        "rate_limited",
+        "auth_error",
+    }
+)
 STATUS_LABELS = {
     "operational": ("🟢", "Plateforme opérationnelle"),
     "warning": ("🟡", "Avertissement"),
@@ -470,6 +480,259 @@ def _persist_anomalies(anomalies: list[dict]) -> None:
     db.commit()
 
 
+def _purge_resolved_incidents() -> int:
+    """Supprime les incidents résolus pour éviter la surcharge."""
+    if not settings.evomonitor_purge_resolved:
+        return 0
+    try:
+        db = get_db()
+        before = int(
+            db.execute("SELECT COUNT(*) AS c FROM monitor_incidents").fetchone()["c"]
+        )
+        db.execute("DELETE FROM monitor_incidents WHERE status = 'resolved'")
+        ack_cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        db.execute(
+            "DELETE FROM monitor_incidents WHERE status = 'acknowledged' AND resolved_at IS NOT NULL AND resolved_at < ?",
+            (ack_cutoff,),
+        )
+        db.commit()
+        after = int(
+            db.execute("SELECT COUNT(*) AS c FROM monitor_incidents").fetchone()["c"]
+        )
+        return max(0, before - after)
+    except Exception:
+        return 0
+
+
+def _auto_resolve_cleared_anomalies(current_anomalies: list[dict]) -> None:
+    """Clôture puis purge les pannes système devenues OK."""
+    titles = {a.get("title") for a in current_anomalies if a.get("title")}
+    try:
+        db = get_db()
+        rows = db.execute(
+            """SELECT id, title, service FROM monitor_incidents
+               WHERE status = 'open' AND service != 'security'"""
+        ).fetchall()
+        now = _now()
+        for row in rows:
+            if row["title"] not in titles:
+                db.execute(
+                    """UPDATE monitor_incidents
+                       SET status = 'resolved', resolved_at = ?, resolved_by = 'system'
+                       WHERE id = ?""",
+                    (now, row["id"]),
+                )
+        db.commit()
+        _purge_resolved_incidents()
+    except Exception:
+        pass
+
+
+def _alert_recipients() -> list[str]:
+    emails = list(settings.evomonitor_alert_emails)
+    if emails:
+        return emails
+    try:
+        rows = get_db().execute(
+            "SELECT email FROM users WHERE role = 'superadmin' AND email IS NOT NULL"
+        ).fetchall()
+        return [
+            str(r["email"]).strip().lower()
+            for r in rows
+            if r["email"]
+        ]
+    except Exception:
+        return []
+
+
+def _security_fingerprint(action: str, actor_email: str, resource: str, meta: dict) -> str:
+    reason = str(meta.get("reason") or meta.get("path") or "")
+    return f"{action}:{actor_email}:{resource}:{reason}"[:200]
+
+
+def _recent_security_alert_exists(fingerprint: str, within_seconds: int = 300) -> bool:
+    since = (datetime.now(timezone.utc) - timedelta(seconds=within_seconds)).isoformat()
+    rows = get_db().execute(
+        """SELECT meta_json FROM monitor_incidents
+           WHERE service = 'security' AND created_at >= ?""",
+        (since,),
+    ).fetchall()
+    for row in rows:
+        meta = _json_load(row["meta_json"] if "meta_json" in row.keys() else None, {})
+        if meta.get("fingerprint") == fingerprint:
+            return True
+    return False
+
+
+def _send_security_emails(title: str, message: str) -> int:
+    if not email_service.smtp_configured():
+        return 0
+    recipients = _alert_recipients()
+    if not recipients:
+        return 0
+    sent = 0
+    body = message + "\n\n— EvoMonitor · alerte sécurité (< 30 s)"
+    for addr in recipients[:5]:
+        try:
+            if email_service.send_platform_notification_email(
+                addr,
+                title,
+                body,
+                f"{settings.frontend_url}/evomonitor/",
+            ):
+                sent += 1
+        except Exception:
+            pass
+    return sent
+
+
+def on_security_event(
+    request,
+    action: str,
+    resource: str,
+    *,
+    actor_email: str | None = None,
+    actor_role: str | None = None,
+    meta: dict | None = None,
+) -> dict | None:
+    """Enregistre et alerte immédiatement (< 30 s) tout accès hors procédure."""
+    meta = meta or {}
+    email = (actor_email or meta.get("identifier") or "inconnu").strip().lower()[:255]
+    role = (actor_role or meta.get("role") or "public")[:40]
+    client = request.client.host if request and request.client else ""
+    path = meta.get("path") or (str(request.url.path) if request else "")
+    reason = meta.get("reason") or action
+    fingerprint = _security_fingerprint(action, email, resource, {**meta, "path": path})
+
+    if _recent_security_alert_exists(fingerprint, within_seconds=300):
+        return None
+
+    title_map = {
+        "login_failed": "Tentative de connexion échouée",
+        "illegal_access": "Accès illégal hors procédure",
+        "access_denied": "Accès refusé (403)",
+        "account_locked": "Compte verrouillé — force brute",
+        "rate_limited": "Attaque par déni (rate limit)",
+        "auth_error": "Erreur authentification suspecte",
+    }
+    title = title_map.get(action, "Alerte sécurité")
+    message = (
+        f"Action : {action}\n"
+        f"Ressource : {resource}\n"
+        f"Identifiant : {email}\n"
+        f"Rôle déclaré : {role}\n"
+        f"Raison : {reason}\n"
+        f"Chemin : {path}\n"
+        f"IP : {client or '—'}"
+    )
+
+    iid = uid("minc")
+    now = _now()
+    get_db().execute(
+        """INSERT INTO monitor_incidents
+           (id, severity, service, title, message, status, meta_json, created_at)
+           VALUES (?, 'critical', 'security', ?, ?, 'open', ?, ?)""",
+        (
+            iid,
+            title,
+            message,
+            json.dumps(
+                {
+                    "action": action,
+                    "resource": resource,
+                    "fingerprint": fingerprint,
+                    "meta": meta,
+                }
+            ),
+            now,
+        ),
+    )
+    get_db().commit()
+    emails_sent = _send_security_emails(f"EvoMonitor — {title}", message)
+    return {"id": iid, "emailsSent": emails_sent, "title": title}
+
+
+def record_http_denial(request, status_code: int) -> None:
+    """Middleware : accès API refusé hors procédure."""
+    path = str(request.url.path)
+    if path.endswith("/health") or "/health" in path:
+        return
+    if status_code == 401:
+        return
+    action = "access_denied"
+    if status_code == 423:
+        action = "account_locked"
+    elif status_code == 429:
+        action = "rate_limited"
+    user = getattr(request.state, "user", None)
+    on_security_event(
+        request,
+        action,
+        path,
+        actor_email=user.get("email") if user else None,
+        actor_role=user.get("role") if user else "anonymous",
+        meta={"reason": f"HTTP_{status_code}", "path": path, "status": status_code},
+    )
+
+
+def scan_recent_security_events(within_seconds: int | None = None) -> list[dict]:
+    """Scan audit_log récent pour alertes non traitées (fenêtre < 30 s par défaut)."""
+    window = within_seconds or settings.evomonitor_security_alert_seconds
+    since = (datetime.now(timezone.utc) - timedelta(seconds=window + 5)).isoformat()
+    rows = get_db().execute(
+        """SELECT * FROM audit_log
+           WHERE created_at >= ? AND action IN ({})
+           ORDER BY created_at DESC LIMIT 20""".format(
+            ",".join("?" for _ in SECURITY_ACTIONS)
+        ),
+        (since, *SECURITY_ACTIONS),
+    ).fetchall()
+    alerts = []
+    for row in rows:
+        meta = _json_load(row["meta"] if "meta" in row.keys() else None, {})
+
+        class _Req:
+            client = type("C", (), {"host": meta.get("ip") or ""})()
+            url = type("U", (), {"path": meta.get("path") or row["resource"] or ""})()
+
+        req = _Req()
+        out = on_security_event(
+            req,
+            row["action"],
+            row["resource"] or "api",
+            actor_email=row["actor_email"],
+            actor_role=row["actor_role"],
+            meta=meta,
+        )
+        if out:
+            alerts.append(out)
+    return alerts
+
+
+def background_tick() -> None:
+    """Boucle serveur : scan sécurité + purge des incidents résolus."""
+    scan_recent_security_events()
+    _purge_resolved_incidents()
+
+
+def security_pulse() -> dict:
+    """Point de contrôle léger pour le frontend (polling ~20 s)."""
+    alerts = scan_recent_security_events()
+    open_security = int(
+        get_db().execute(
+            "SELECT COUNT(*) AS c FROM monitor_incidents WHERE service = 'security' AND status = 'open'"
+        ).fetchone()["c"]
+    )
+    return {
+        "windowSeconds": settings.evomonitor_security_alert_seconds,
+        "newAlerts": len(alerts),
+        "openSecurityIncidents": open_security,
+        "alertRecipients": len(_alert_recipients()),
+        "alerts": alerts,
+        "updatedAt": _now(),
+    }
+
+
 def _notify_admins(anomalies: list[dict], actor: dict) -> int:
     if not email_service.smtp_configured():
         return 0
@@ -477,25 +740,31 @@ def _notify_admins(anomalies: list[dict], actor: dict) -> int:
     if not critical:
         return 0
     sent = 0
-    admin_email = (actor.get("email") or "").strip()
-    if not admin_email:
+    recipients = _alert_recipients()
+    if actor.get("email"):
+        actor_mail = actor.get("email").strip().lower()
+        if actor_mail and actor_mail not in recipients:
+            recipients = [actor_mail] + recipients
+    if not recipients:
         return 0
     lines = "\n".join(f"• {a['title']}: {a['message']}" for a in critical[:5])
     body = f"EvoMonitor a détecté {len(critical)} alerte(s) critique(s) :\n\n{lines}"
-    try:
-        if email_service.send_platform_notification_email(
-            admin_email,
-            "EvoMonitor — alerte critique",
-            body,
-            f"{settings.frontend_url}/evomonitor/",
-        ):
-            sent = 1
-    except Exception:
-        pass
+    for addr in recipients[:5]:
+        try:
+            if email_service.send_platform_notification_email(
+                addr,
+                "EvoMonitor — alerte critique",
+                body,
+                f"{settings.frontend_url}/evomonitor/",
+            ):
+                sent += 1
+        except Exception:
+            pass
     return sent
 
 
 def get_overview(actor: dict, *, persist: bool = True, notify: bool = False) -> dict:
+    purged = _purge_resolved_incidents()
     perf = _collect_performance()
     db_info = _collect_database()
     perf["responseMs"] = db_info.get("queryMs")
@@ -508,6 +777,8 @@ def get_overview(actor: dict, *, persist: bool = True, notify: bool = False) -> 
 
     if persist:
         _persist_anomalies(anomalies)
+        _auto_resolve_cleared_anomalies(anomalies)
+    scan_recent_security_events()
     emails_sent = 0
     if notify:
         emails_sent = _notify_admins(anomalies, actor)
@@ -521,7 +792,9 @@ def get_overview(actor: dict, *, persist: bool = True, notify: bool = False) -> 
             ).fetchone()["c"]
         )
         rows = get_db().execute(
-            """SELECT * FROM monitor_incidents ORDER BY created_at DESC LIMIT 30"""
+            """SELECT * FROM monitor_incidents
+               WHERE status IN ('open', 'acknowledged')
+               ORDER BY created_at DESC LIMIT 30"""
         ).fetchall()
         recent_incidents = [_row_to_incident(r) for r in rows]
     except Exception:
@@ -550,6 +823,14 @@ def get_overview(actor: dict, *, persist: bool = True, notify: bool = False) -> 
             "emailConfigured": email_service.smtp_configured(),
             "emailsSent": emails_sent,
             "openIncidents": open_count,
+            "openSecurityIncidents": int(
+                get_db().execute(
+                    "SELECT COUNT(*) AS c FROM monitor_incidents WHERE service = 'security' AND status = 'open'"
+                ).fetchone()["c"]
+            ),
+            "alertRecipients": len(_alert_recipients()),
+            "securityWindowSeconds": settings.evomonitor_security_alert_seconds,
+            "purgedResolved": purged,
         },
         "incidents": {
             "open": open_count,
@@ -588,7 +869,10 @@ def _row_to_incident(row) -> dict:
 def list_incidents(limit: int = 50) -> list[dict]:
     lim = max(1, min(int(limit or 50), 200))
     rows = get_db().execute(
-        f"SELECT * FROM monitor_incidents ORDER BY created_at DESC LIMIT {lim}"
+        """SELECT * FROM monitor_incidents
+           WHERE status IN ('open', 'acknowledged')
+           ORDER BY created_at DESC LIMIT ?""",
+        (lim,),
     ).fetchall()
     return [_row_to_incident(r) for r in rows]
 
@@ -614,5 +898,10 @@ def resolve_incident(actor: dict, incident_id: str, status: str = "resolved") ->
         (status, resolved_at, resolved_by, iid),
     )
     get_db().commit()
+    if status == "resolved":
+        _purge_resolved_incidents()
+        row = get_db().execute("SELECT * FROM monitor_incidents WHERE id = ?", (iid,)).fetchone()
+        if not row:
+            return {"id": iid, "status": "resolved", "purged": True}
     row = get_db().execute("SELECT * FROM monitor_incidents WHERE id = ?", (iid,)).fetchone()
     return _row_to_incident(row)

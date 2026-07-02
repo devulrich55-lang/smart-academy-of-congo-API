@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 
 
 
@@ -63,7 +64,25 @@ async def lifespan(_app: FastAPI):
             print(f"[SAC] Maintenance: {maint}")
     except Exception as exc:
         print(f"[SAC] Maintenance skipped: {exc}")
+
+    async def _evomonitor_loop():
+        from app.services import monitor_service
+
+        interval = max(10, min(settings.evomonitor_security_alert_seconds, 30))
+        while True:
+            try:
+                await asyncio.to_thread(monitor_service.background_tick)
+            except Exception as exc:
+                print(f"[EvoMonitor] background tick: {exc}")
+            await asyncio.sleep(interval)
+
+    evomonitor_task = asyncio.create_task(_evomonitor_loop())
     yield
+    evomonitor_task.cancel()
+    try:
+        await evomonitor_task
+    except asyncio.CancelledError:
+        pass
 
 
 
@@ -82,6 +101,21 @@ app.state.limiter = limiter
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.middleware("http")
+async def evomonitor_security_middleware(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return response
+    if response.status_code in (403, 423, 429):
+        try:
+            from app.services import monitor_service
+
+            monitor_service.record_http_denial(request, response.status_code)
+        except Exception:
+            pass
+    return response
 
 
 app.add_middleware(GZipMiddleware, minimum_size=500)

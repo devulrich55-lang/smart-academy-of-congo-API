@@ -33,6 +33,12 @@ def monitor_overview(
         _map_error(e)
 
 
+@router.get("/security-pulse")
+def monitor_security_pulse(user: dict = Depends(require_roles("superadmin"))):
+    del user
+    return monitor_service.security_pulse()
+
+
 @router.get("/incidents")
 def monitor_incidents(
     user: dict = Depends(require_roles("superadmin")),

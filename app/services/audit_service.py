@@ -12,7 +12,24 @@ ACTION_LABELS = {
     "delete_institutional_admin": "Suppression administrateur",
     "create_document": "Publication document",
     "delete_document": "Suppression document",
+    "login_failed": "Échec connexion",
+    "illegal_access": "Accès illégal",
+    "access_denied": "Accès refusé",
+    "account_locked": "Compte verrouillé",
+    "rate_limited": "Limite de requêtes",
+    "auth_error": "Erreur authentification",
 }
+
+SECURITY_ACTIONS = frozenset(
+    {
+        "login_failed",
+        "illegal_access",
+        "access_denied",
+        "account_locked",
+        "rate_limited",
+        "auth_error",
+    }
+)
 
 
 def log_audit(request, action: str, resource: str, **kwargs) -> None:
@@ -38,8 +55,29 @@ def log_audit(request, action: str, resource: str, **kwargs) -> None:
             ),
         )
         get_db().commit()
+        if action in SECURITY_ACTIONS:
+            try:
+                from app.services import monitor_service
+
+                monitor_service.on_security_event(
+                    request,
+                    action,
+                    resource,
+                    actor_email=user.get("email") if user else kwargs.get("actor_email"),
+                    actor_role=user.get("role") if user else kwargs.get("actor_role", "public"),
+                    meta=kwargs.get("meta") or {},
+                )
+            except Exception as exc:
+                print(f"[EvoMonitor] security alert skip: {exc}")
     except Exception as exc:
         print(f"[SAC] audit_log skip: {exc}")
+
+
+def log_security_event(request, action: str, resource: str, **kwargs) -> None:
+    """Journalise un accès suspect et déclenche l'alerte EvoMonitor (< 30 s)."""
+    if action not in SECURITY_ACTIONS:
+        action = "illegal_access"
+    log_audit(request, action, resource, **kwargs)
 
 
 def _row_to_activity(row) -> dict:

@@ -119,6 +119,24 @@ def login_route(request: Request, body: dict, response: Response):
             payload["refreshToken"] = result["refreshRaw"]
         return payload
     except ValueError as e:
+        code = str(e)
+        action = "illegal_access"
+        if code == "INVALID_CREDENTIALS":
+            action = "login_failed"
+        elif code == "ACCOUNT_LOCKED":
+            action = "account_locked"
+        audit_service.log_security_event(
+            request,
+            action,
+            "auth/login",
+            actor_email=str(identifier).strip().lower()[:255],
+            actor_role=str(body.get("role") or "unknown"),
+            meta={
+                "reason": code,
+                "path": str(request.url.path),
+                "identifier": str(identifier).strip().lower()[:255],
+            },
+        )
         _map_error(e)
 
 

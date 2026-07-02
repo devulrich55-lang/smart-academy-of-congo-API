@@ -115,6 +115,17 @@ class Settings:
     social_email_notifications: bool = (
         os.getenv("SOCIAL_EMAIL_NOTIFICATIONS", "true").lower() == "true"
     )
+    evomonitor_alert_emails: list[str] = [
+        e.strip().lower()
+        for e in os.getenv("EVOMONITOR_ALERT_EMAIL", "").split(",")
+        if e.strip()
+    ]
+    evomonitor_security_alert_seconds: int = int(
+        os.getenv("EVOMONITOR_SECURITY_ALERT_SECONDS", "30")
+    )
+    evomonitor_purge_resolved: bool = (
+        os.getenv("EVOMONITOR_PURGE_RESOLVED", "true").lower() != "false"
+    )
 
     @property
     def use_mysql(self) -> bool:
