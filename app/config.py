@@ -173,16 +173,15 @@ settings = Settings()
 settings.storage_ephemeral = False
 # Gmail : raccourci — GMAIL_USER + GMAIL_APP_PASSWORD suffisent
 if settings.gmail_user and settings.gmail_app_password:
-    if not settings.smtp_host:
-        settings.smtp_host = "smtp.gmail.com"
-    if not settings.smtp_user:
-        settings.smtp_user = settings.gmail_user
-    if not settings.smtp_pass:
-        settings.smtp_pass = settings.gmail_app_password.replace(" ", "")
-    if not settings.email_from:
-        settings.email_from = settings.gmail_user
-    if os.getenv("SMTP_PORT") is None and not settings.smtp_use_ssl:
-        settings.smtp_port = 587
+    settings.smtp_host = settings.smtp_host or "smtp.gmail.com"
+    settings.smtp_user = settings.gmail_user
+    settings.smtp_pass = settings.gmail_app_password.replace(" ", "")
+    # Gmail refuse un expéditeur différent du compte authentifié (ex. noreply@… sur Render).
+    settings.email_from = settings.gmail_user
+    if os.getenv("SMTP_PORT") is None:
+        settings.smtp_port = 465
+        settings.smtp_use_ssl = True
+        settings.smtp_use_tls = False
 
 if not settings.email_from:
     settings.email_from = "noreply@smartacademy.cd"
@@ -193,6 +192,8 @@ if settings.frontend_url and settings.frontend_url.rstrip("/") not in settings.a
 # Render : autoriser les frontends SAC connus si ALLOWED_ORIGINS incomplet
 if os.getenv("RENDER", "").lower() == "true":
     for _origin in (
+        "https://evosmartuni.com",
+        "https://www.evosmartuni.com",
         "https://smart-academy-of-congo-dbfm.onrender.com",
         "https://smart-academy-of-congoat.onrender.com",
         "https://smart-academy-of-congo.onrender.com",

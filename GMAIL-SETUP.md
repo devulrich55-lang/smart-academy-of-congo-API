@@ -14,12 +14,12 @@ Google n'accepte plus le mot de passe du compte pour SMTP. Il faut un **mot de p
 
 ## 2. Variables sur Render (recommandé)
 
-Dans **smart-academy-of-congo-API-1 → Environment** :
+Dans **Evo-smartUni-API-1 → Environment** :
 
 ```env
 GMAIL_USER=votre-compte@gmail.com
 GMAIL_APP_PASSWORD=abcdefghijklmnop
-FRONTEND_URL=https://smart-academy-of-congo-dbfm.onrender.com
+FRONTEND_URL=https://evosmartuni.com
 RESET_TOKEN_HOURS=1
 ```
 
@@ -59,7 +59,7 @@ Sans Gmail configuré, le code et le lien s'affichent dans les **logs** du serve
 ## 4. Vérification
 
 ```http
-GET https://smart-academy-of-congo-api-1.onrender.com/api/health
+GET https://Evo-smartUni-api-1.onrender.com/api/health
 ```
 
 Réponse attendue :
@@ -93,5 +93,6 @@ Même procédure : mot de passe d'application pour ce compte.
 |----------|----------|
 | `emailConfigured: false` | Ajoutez `GMAIL_USER` + `GMAIL_APP_PASSWORD` sur Render |
 | Authentification refusée | Nouveau mot de passe d'application, 2FA activée |
+| `EMAIL_SEND_FAILED` / envoi impossible | **Ne pas** mettre `EMAIL_FROM=noreply@…` si vous utilisez Gmail perso — l'expéditeur doit être = `GMAIL_USER` |
 | E-mail en spam | Marquez comme « Non spam », utilisez un expéditeur fixe |
 | Code expiré | Demandez un nouveau code (valide `RESET_TOKEN_HOURS` h) |

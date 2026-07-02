@@ -104,11 +104,24 @@ def send_password_reset_email(
         return True
     except smtplib.SMTPAuthenticationError:
         logger.error(
-            "Échec authentification Gmail/SMTP — vérifiez GMAIL_APP_PASSWORD ou SMTP_PASS"
+            "Échec authentification Gmail/SMTP pour %s — vérifiez GMAIL_APP_PASSWORD (mot de passe d'application, pas le mot de passe du compte)",
+            settings.smtp_user or settings.gmail_user,
         )
         return False
+    except smtplib.SMTPRecipientsRefused:
+        logger.error("Destinataire refusé par Gmail : %s", to_email)
+        return False
     except Exception as exc:
-        logger.error("Échec envoi e-mail à %s : %s", to_email, exc)
+        logger.error(
+            "Échec envoi e-mail à %s (from=%s host=%s:%s ssl=%s tls=%s) : %s",
+            to_email,
+            settings.email_from,
+            settings.smtp_host,
+            settings.smtp_port,
+            settings.smtp_use_ssl,
+            settings.smtp_use_tls,
+            exc,
+        )
         return False
 
 

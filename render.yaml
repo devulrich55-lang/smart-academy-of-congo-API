@@ -6,7 +6,7 @@
 
 services:
   - type: web
-    name: sac-api-python
+    name: evosu-api-python
     runtime: python
     rootDir: backend-python
     plan: standard
@@ -15,7 +15,7 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     disk:
-      name: sac-data
+      name: evosu-data
       mountPath: /data
       sizeGB: 1
     envVars:
@@ -28,14 +28,14 @@ services:
       - key: DATABASE_BACKEND
         value: sqlite
       - key: DATABASE_PATH
-        value: /data/sac.db
+        value: /data/EvoSU.db
       - key: UPLOAD_DIR
         value: /data/uploads
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
-      - key: SAC_PLATFORM_SECRET
+      - key: EVOSU_PLATFORM_SECRET
         generateValue: true
       - key: ALLOWED_ORIGINS
         value: https://REPLACE-WITH-YOUR-FRONTEND-URL.com
@@ -46,10 +46,17 @@ services:
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
-        value: "587"
+        value: "465"
+      - key: SMTP_USE_SSL
+        value: "true"
+      - key: SMTP_USE_TLS
+        value: "false"
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
         sync: false
-      - key: EMAIL_FROM
-        value: noreply@smartacademy.cd
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      # Ne pas fixer EMAIL_FROM ici : doit être = GMAIL_USER (voir app/config.py)
