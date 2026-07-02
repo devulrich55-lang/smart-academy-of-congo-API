@@ -243,7 +243,7 @@ def _collect_users() -> dict:
         failed_logins = int(
             db.execute(
                 """SELECT COUNT(*) AS c FROM audit_log
-                   WHERE created_at >= ? AND action IN ('login_failed', 'login')""",
+                   WHERE created_at >= ? AND action IN ('login_failed', 'illegal_access', 'account_locked')""",
                 (since_24h,),
             ).fetchone()["c"]
         )
