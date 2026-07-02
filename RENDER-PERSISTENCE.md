@@ -14,7 +14,7 @@
 
 DATABASE_BACKEND=sqlite
 
-DATABASE_PATH=/data/sac.db
+DATABASE_PATH=/data/EvoSU.db
 
 UPLOAD_DIR=/data/uploads
 
@@ -64,7 +64,7 @@ Voir `MYSQL-SETUP.md`.
 
 
 
-Render → **smart-academy-of-congo-API-1** → **Disks**
+Render → **Evo-smartUni-API-1** → **Disks**
 
 
 
@@ -82,7 +82,7 @@ Render → **smart-academy-of-congo-API-1** → **Disks**
 
 |----------|--------|
 
-| `DATABASE_PATH` | `/data/sac.db` (mode test uniquement) |
+| `DATABASE_PATH` | `/data/EvoSU.db` (mode test uniquement) |
 
 | `UPLOAD_DIR` | `/data/uploads` |
 

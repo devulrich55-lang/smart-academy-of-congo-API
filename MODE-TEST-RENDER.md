@@ -15,7 +15,7 @@ Les comptes **ne survivent pas** à un redéploiement. Utile pour tester que l'A
 
 ```env
 DATABASE_BACKEND=sqlite
-SAC_RENDER_FREE=true
+EVOSU_RENDER_FREE=true
 ```
 
 Ne définissez **pas** `DATABASE_PATH=/data/...` (pas de disque sur le plan gratuit).
@@ -28,21 +28,21 @@ Plan **Starter** (~7 $/mois) + disque **1 Go** sur `/data`.
 
 ```env
 DATABASE_BACKEND=sqlite
-DATABASE_PATH=/data/sac.db
+DATABASE_PATH=/data/EvoSU.db
 UPLOAD_DIR=/data/uploads
 ```
 
-**Ne pas** définir `SAC_RENDER_FREE`.
+**Ne pas** définir `EVOSU_RENDER_FREE`.
 
 ---
 
 ### 1. Disque persistant
 
-Render → **smart-academy-of-congo-API-1** → **Disks** → Add disk
+Render → **Evo-smartUni-API-1** → **Disks** → Add disk
 
 | Champ | Valeur |
 |-------|--------|
-| Name | `sac-data` |
+| Name | `evosu-data` |
 | Mount path | `/data` |
 | Size | **1 Go** suffit pour ~30–500 comptes |
 
@@ -57,12 +57,12 @@ Render → **smart-academy-of-congo-API-1** → **Disks** → Add disk
 ```env
 NODE_ENV=production
 DATABASE_BACKEND=sqlite
-DATABASE_PATH=/data/sac.db
+DATABASE_PATH=/data/EvoSU.db
 UPLOAD_DIR=/data/uploads
 COOKIE_SECURE=true
 CROSS_ORIGIN_AUTH=true
-ALLOWED_ORIGINS=https://smart-academy-of-congo-dbfm.onrender.com
-FRONTEND_URL=https://smart-academy-of-congo-dbfm.onrender.com
+ALLOWED_ORIGINS=https://Evo-smartUni-dbfm.onrender.com
+FRONTEND_URL=https://Evo-smartUni-dbfm.onrender.com
 GMAIL_USER=votre-compte@gmail.com
 GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 ```
@@ -71,7 +71,7 @@ GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 
 Attendez **Live**, puis vérifiez :
 
-`https://smart-academy-of-congo-api-1.onrender.com/api/health`
+`https://Evo-smartUni-api-1.onrender.com/api/health`
 
 Réponse attendue :
 
@@ -82,7 +82,7 @@ Réponse attendue :
   "storage": {
     "backend": "sqlite",
     "mode": "sqlite-test",
-    "databasePath": "/data/sac.db",
+    "databasePath": "/data/EvoSU.db",
     "dbOnRenderDisk": true,
     "uploadsOnRenderDisk": true,
     "persistentOnRenderDisk": true,

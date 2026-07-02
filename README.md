@@ -1,4 +1,4 @@
-# API Python — Smart Academy of Congo
+# API Python — Evo-smartUni
 
 Backend **FastAPI** — authentification, documents, notes, publications, plateforme.
 
@@ -23,7 +23,7 @@ Comptes démo : `etu.demo@unikin.cd` / `Demo2025!`
 
 1. Disque persistant : mount **`/data`**, 1 Go
 2. Variables :
-   - `DATABASE_PATH=/data/sac.db`
+   - `DATABASE_PATH=/data/EvoSU.db`
    - `UPLOAD_DIR=/data/uploads`
 
 Guide complet : **`RENDER-PERSISTENCE.md`**

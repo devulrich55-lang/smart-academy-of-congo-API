@@ -33,7 +33,7 @@ SQLite n’est plus utilisé en production — voir `MYSQL-SETUP.md`.
 
 ## Configuration Render recommandée
 
-### API (`smart-academy-of-congo-API-1`)
+### API (`Evo-smartUni-API-1`)
 
 | Paramètre | Valeur |
 |---|---|
