@@ -1657,19 +1657,42 @@ def _migrate_users_developpeur_role_sqlite(conn: sqlite3.Connection) -> None:
 
 def _migrate_users_roles_mysql(conn) -> None:
     """Étend le CHECK role MySQL (developpeur, techmanager, admin…)."""
-    roles = (
+    roles_sql = (
         "'etudiant','professeur','assistant','universite','section',"
         "'ministere','superadmin','developpeur','techmanager'"
     )
+    required = ("developpeur", "techmanager")
     cur = conn.cursor()
-    try:
-        cur.execute("SHOW CREATE TABLE users")
-        row = cur.fetchone()
-        ddl = (row[1] if row and len(row) > 1 else "") or ""
-        if "'developpeur'" in ddl and "'techmanager'" in ddl:
-            return
-    except pymysql.err.OperationalError:
-        pass
+
+    def role_checks_ok() -> bool:
+        try:
+            cur.execute(
+                """
+                SELECT cc.CHECK_CLAUSE
+                FROM information_schema.CHECK_CONSTRAINTS cc
+                JOIN information_schema.TABLE_CONSTRAINTS tc
+                  ON cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                 AND cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+                WHERE tc.TABLE_SCHEMA = DATABASE()
+                  AND tc.TABLE_NAME = 'users'
+                  AND tc.CONSTRAINT_TYPE = 'CHECK'
+                """
+            )
+            clauses = [
+                str(row[0] if isinstance(row, (list, tuple)) else row.get("CHECK_CLAUSE") or "")
+                for row in cur.fetchall()
+            ]
+            role_clauses = [c for c in clauses if "role" in c.lower()]
+            if not role_clauses:
+                return True
+            return all(all(f"'{role}'" in clause for role in required) for clause in role_clauses)
+        except pymysql.err.OperationalError:
+            return False
+
+    if role_checks_ok():
+        cur.close()
+        return
+
     try:
         cur.execute(
             """
@@ -1680,7 +1703,10 @@ def _migrate_users_roles_mysql(conn) -> None:
               AND CONSTRAINT_TYPE = 'CHECK'
             """
         )
-        for (name,) in cur.fetchall():
+        for row in cur.fetchall():
+            name = row[0] if isinstance(row, (list, tuple)) else row.get("CONSTRAINT_NAME")
+            if not name:
+                continue
             try:
                 cur.execute(f"ALTER TABLE users DROP CHECK `{name}`")
                 conn.commit()
@@ -1692,9 +1718,10 @@ def _migrate_users_roles_mysql(conn) -> None:
             conn.commit()
         except pymysql.err.OperationalError:
             pass
+
     try:
         cur.execute(
-            f"ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ({roles}))"
+            f"ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ({roles_sql}))"
         )
         conn.commit()
     except pymysql.err.OperationalError:

@@ -1631,7 +1631,9 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
                 payload.get("universite") or "",
                 faculty_sections,
             )
-    return _institutional_row(created)
+    row = _institutional_row(created)
+    print(f"[SAC] Compte institutionnel créé: {row.get('email')} ({row.get('role')})")
+    return row
 
 
 def seed_faculty_sections_for_campus(campus: str, rows: list) -> list[dict]:
