@@ -37,7 +37,12 @@ from app.rate_limit import limiter
 
 from app.routes import admin, auth, dev_center, documents, monitor, nominations, payments, platform, reclamations, sections, tariffs, tech_manager, webrtc
 
-from app.seed import seed_demo_sections_if_missing, seed_if_empty, seed_institutional_admins_if_missing
+from app.seed import (
+    seed_demo_sections_if_missing,
+    seed_if_empty,
+    seed_institutional_admins_if_missing,
+    seed_tech_team_if_missing,
+)
 
 
 
@@ -58,6 +63,7 @@ async def lifespan(_app: FastAPI):
     seed_if_empty()
     seed_demo_sections_if_missing()
     seed_institutional_admins_if_missing()
+    seed_tech_team_if_missing()
     try:
         maint = run_maintenance()
         if maint["refreshTokensPurged"] or maint["resetTokensPurged"]:

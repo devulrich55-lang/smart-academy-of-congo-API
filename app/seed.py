@@ -318,3 +318,43 @@ def seed_institutional_admins_if_missing() -> None:
             "— mot de passe:",
             INSTITUTIONAL_PASSWORD,
         )
+
+
+TECH_TEAM_PASSWORD = "EvoSU2026!"
+
+
+def seed_tech_team_if_missing() -> None:
+    """Comptes Dev Center et Tech Manager (Jean + responsable technique)."""
+    from app.services.user_service import create_user, find_user_by_email
+
+    seeds = [
+        {
+            "email": "jean.mukendi@evosmartuni.com",
+            "role": "developpeur",
+            "prenom": "Jean",
+            "nom": "Mukendi",
+            "telephone": "+243 81 500 0001",
+            "fonction": "Développeur Backend Python",
+        },
+        {
+            "email": "tech.manager@evosmartuni.com",
+            "role": "techmanager",
+            "prenom": "Patrick",
+            "nom": "Kabila",
+            "telephone": "+243 81 500 0002",
+            "fonction": "Responsable technique EvoSU",
+        },
+    ]
+    created = []
+    for item in seeds:
+        if find_user_by_email(item["email"]):
+            continue
+        create_user({**item, "password": TECH_TEAM_PASSWORD})
+        created.append(f"{item['email']} ({item['role']})")
+    if created:
+        print(
+            "[SAC] Équipe tech créée:",
+            ", ".join(created),
+            "— mot de passe:",
+            TECH_TEAM_PASSWORD,
+        )
