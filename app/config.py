@@ -129,6 +129,12 @@ class Settings:
     evomonitor_telegram_bot_token: str = os.getenv("EVOMONITOR_TELEGRAM_BOT_TOKEN", "").strip()
     evomonitor_telegram_chat_id: str = os.getenv("EVOMONITOR_TELEGRAM_CHAT_ID", "").strip()
     evomonitor_sms_webhook_url: str = os.getenv("EVOMONITOR_SMS_WEBHOOK_URL", "").strip()
+    evomonitor_ai_ops_use_llm: bool = os.getenv("EVOMONITOR_AI_OPS_USE_LLM", "true").lower() == "true"
+    evomonitor_dev_ticket_emails: list[str] = [
+        e.strip().lower()
+        for e in os.getenv("EVOMONITOR_DEV_TICKET_EMAIL", "").split(",")
+        if e.strip()
+    ]
 
     @property
     def use_mysql(self) -> bool:

@@ -1511,6 +1511,74 @@ def _migrate_monitor_metrics_snapshots_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_monitor_dev_tickets_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS monitor_dev_tickets (
+                  id VARCHAR(80) PRIMARY KEY,
+                  ticket_number VARCHAR(30) NOT NULL,
+                  title VARCHAR(200) NOT NULL,
+                  description TEXT NULL,
+                  severity VARCHAR(20) NULL,
+                  service VARCHAR(40) NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'open',
+                  error_context_json TEXT NULL,
+                  analysis_json TEXT NULL,
+                  corrective_code TEXT NULL,
+                  assignee VARCHAR(255) NULL,
+                  created_by VARCHAR(255) NULL,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_dev_tickets_status ON monitor_dev_tickets(status, created_at)",
+            "CREATE INDEX idx_dev_tickets_number ON monitor_dev_tickets(ticket_number)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS monitor_dev_tickets (
+              id TEXT PRIMARY KEY,
+              ticket_number TEXT NOT NULL,
+              title TEXT NOT NULL,
+              description TEXT,
+              severity TEXT,
+              service TEXT,
+              status TEXT NOT NULL DEFAULT 'open',
+              error_context_json TEXT,
+              analysis_json TEXT,
+              corrective_code TEXT,
+              assignee TEXT,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_dev_tickets_status ON monitor_dev_tickets(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_dev_tickets_number ON monitor_dev_tickets(ticket_number);
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_mobile_money_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1718,6 +1786,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_social_study_groups_table(conn, "mysql")
     _migrate_monitor_incidents_table(conn, "mysql")
     _migrate_monitor_metrics_snapshots_table(conn, "mysql")
+    _migrate_monitor_dev_tickets_table(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
@@ -1855,6 +1924,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_social_study_groups_table(conn, "sqlite")
     _migrate_monitor_incidents_table(conn, "sqlite")
     _migrate_monitor_metrics_snapshots_table(conn, "sqlite")
+    _migrate_monitor_dev_tickets_table(conn, "sqlite")
     _migrate_mobile_money_table(conn, "sqlite")
     _migrate_live_sessions_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
