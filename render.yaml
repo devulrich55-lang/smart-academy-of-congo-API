@@ -31,6 +31,14 @@ services:
         value: /data/EvoSU.db
       - key: UPLOAD_DIR
         value: /data/uploads
+      - key: BACKUP_DIR
+        value: /data/backups
+      - key: BACKUP_INTERVAL_HOURS
+        value: "6"
+      - key: BACKUP_RETENTION_HOURS
+        value: "24"
+      - key: BACKUP_ENABLED
+        value: "true"
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET

@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import asyncio
+import os
 
 
 
@@ -35,7 +36,7 @@ from app.middleware.security import (
 
 from app.rate_limit import limiter
 
-from app.routes import admin, auth, dev_center, documents, monitor, nominations, payments, platform, reclamations, sections, tariffs, tech_manager, webrtc
+from app.routes import admin, auth, backup, dev_center, documents, monitor, nominations, payments, platform, reclamations, sections, tariffs, tech_manager, webrtc
 
 from app.seed import (
     seed_demo_sections_if_missing,
@@ -86,12 +87,35 @@ async def lifespan(_app: FastAPI):
             await asyncio.sleep(interval)
 
     evomonitor_task = asyncio.create_task(_evomonitor_loop())
+
+    async def _backup_loop():
+        from app.services import backup_service
+
+        await asyncio.sleep(90)
+        while True:
+            try:
+                backup_service.run_scheduled_backup()
+            except Exception as exc:
+                print(f"[Backup] Erreur planifiée: {exc}")
+            await asyncio.sleep(max(3600, backup_service._interval_seconds()))
+
+    backup_task = None
+    if os.getenv("BACKUP_ENABLED", "true").lower() != "false":
+        backup_task = asyncio.create_task(_backup_loop())
+
     yield
     evomonitor_task.cancel()
+    if backup_task:
+        backup_task.cancel()
     try:
         await evomonitor_task
     except asyncio.CancelledError:
         pass
+    if backup_task:
+        try:
+            await backup_task
+        except asyncio.CancelledError:
+            pass
 
 
 
@@ -258,6 +282,8 @@ app.include_router(reclamations.router, prefix="/api")
 app.include_router(nominations.router, prefix="/api")
 
 app.include_router(admin.router, prefix="/api")
+
+app.include_router(backup.router, prefix="/api")
 
 app.include_router(monitor.router, prefix="/api")
 

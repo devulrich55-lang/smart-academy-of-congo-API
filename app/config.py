@@ -166,6 +166,11 @@ class Settings:
         if not self.use_mysql:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        backup_raw = os.getenv("BACKUP_DIR", "").strip()
+        if backup_raw:
+            Path(backup_raw).mkdir(parents=True, exist_ok=True)
+        elif self.db_on_render_disk:
+            Path("/data/backups").mkdir(parents=True, exist_ok=True)
 
     @property
     def uploads_on_render_disk(self) -> bool:

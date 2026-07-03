@@ -135,21 +135,28 @@ def _collect_database() -> dict:
 
     backup_status = "non_configure"
     backup_label = "Sauvegarde non configurée"
-    backup_dir = os.getenv("BACKUP_DIR", "").strip()
-    if backup_dir and Path(backup_dir).exists():
-        backups = sorted(Path(backup_dir).glob("*.db")) + sorted(Path(backup_dir).glob("*.sql"))
-        if backups:
-            latest = backups[-1]
-            age_h = (time.time() - latest.stat().st_mtime) / 3600
-            if age_h < 26:
+    try:
+        from app.services import backup_service
+
+        st = backup_service.get_status()
+        latest = st.get("latest")
+        if latest:
+            age_h = latest.get("ageHours", 999)
+            interval = st.get("intervalHours", 6)
+            if age_h <= interval + 1:
                 backup_status = "ok"
-                backup_label = f"Dernière sauvegarde : {latest.name}"
+                backup_label = f"Dernière : {latest.get('createdAt', '')[:16]} ({latest.get('sizeLabel', '')})"
+            elif age_h <= st.get("retentionHours", 24):
+                backup_status = "stale"
+                backup_label = f"Sauvegarde il y a {int(age_h)} h — prochaine auto bientôt"
             else:
                 backup_status = "stale"
                 backup_label = f"Sauvegarde obsolète ({int(age_h)} h)"
-        else:
+        elif st.get("enabled"):
             backup_status = "empty"
-            backup_label = "Dossier sauvegarde vide"
+            backup_label = "Aucune sauvegarde — création au prochain cycle"
+    except Exception:
+        pass
 
     return {
         "connected": connected,
