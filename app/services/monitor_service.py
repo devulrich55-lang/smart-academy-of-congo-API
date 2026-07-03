@@ -800,7 +800,7 @@ def get_overview(actor: dict, *, persist: bool = True, notify: bool = False) -> 
     except Exception:
         pass
 
-    return {
+    payload = {
         "status": status,
         "statusIcon": icon,
         "statusLabel": label,
@@ -837,6 +837,9 @@ def get_overview(actor: dict, *, persist: bool = True, notify: bool = False) -> 
             "recent": recent_incidents,
         },
     }
+    from app.services import monitor_sata_service
+
+    return monitor_sata_service.enrich_overview(payload)
 
 
 def _row_to_incident(row) -> dict:
@@ -862,6 +865,7 @@ def _row_to_incident(row) -> dict:
         "resolvedBy": (row["resolved_by"] if "resolved_by" in row.keys() else None) or None,
         "resolutionMs": resolution_ms,
         "actions": meta.get("actions") or [],
+        "assignee": meta.get("assignee"),
         "createdAt": created,
     }
 

@@ -75,7 +75,7 @@ def _row_to_item(row) -> dict:
 
 
 def _assert_ministry(actor: dict) -> None:
-    if actor.get("role") != AUTHOR_ROLE:
+    if actor.get("role") not in (AUTHOR_ROLE, "superadmin"):
         raise ValueError("FORBIDDEN")
 
 

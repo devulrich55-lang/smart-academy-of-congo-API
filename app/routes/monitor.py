@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.deps import require_roles
-from app.services import monitor_service
+from app.services import monitor_service, monitor_sata_service
 
 router = APIRouter(prefix="/admin/monitor", tags=["monitor"])
 
@@ -49,17 +49,65 @@ def monitor_incidents(
 
 
 @router.patch("/incidents/{incident_id}")
-def monitor_resolve_incident(
+def monitor_update_incident(
     incident_id: str,
     body: dict,
     user: dict = Depends(require_roles("superadmin")),
 ):
     try:
-        incident = monitor_service.resolve_incident(
-            user,
-            incident_id,
-            body.get("status") or "resolved",
-        )
+        incident = monitor_sata_service.update_incident(user, incident_id, body or {})
         return {"ok": True, "incident": incident}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/logs")
+def monitor_logs(
+    user: dict = Depends(require_roles("superadmin")),
+    q: str | None = Query(None),
+    category: str | None = Query(None),
+    level: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+):
+    del user
+    logs = monitor_sata_service.list_logs(q=q, category=category, level=level, limit=limit)
+    repeats = monitor_sata_service.detect_repeated_errors(logs)
+    return {"logs": logs, "repeats": repeats, "count": len(logs)}
+
+
+@router.post("/heal")
+def monitor_heal(
+    body: dict,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    del user
+    try:
+        action = (body or {}).get("action") or "ping_api"
+        result = monitor_sata_service.trigger_heal(action)
+        return {"ok": result.get("ok", False), **result}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/alerts/dispatch")
+def monitor_dispatch_alert(
+    body: dict,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    del user
+    return monitor_sata_service.dispatch_alert(body or {})
+
+
+@router.post("/simulate")
+def monitor_simulate(
+    body: dict,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    del user
+    scenario = (body or {}).get("scenario") or ""
+    if scenario == "stop" or (body or {}).get("stop"):
+        return monitor_sata_service.stop_simulation()
+    try:
+        return monitor_sata_service.start_simulation(scenario or "traffic")
     except ValueError as e:
         _map_error(e)

@@ -126,6 +126,9 @@ class Settings:
     evomonitor_purge_resolved: bool = (
         os.getenv("EVOMONITOR_PURGE_RESOLVED", "true").lower() != "false"
     )
+    evomonitor_telegram_bot_token: str = os.getenv("EVOMONITOR_TELEGRAM_BOT_TOKEN", "").strip()
+    evomonitor_telegram_chat_id: str = os.getenv("EVOMONITOR_TELEGRAM_CHAT_ID", "").strip()
+    evomonitor_sms_webhook_url: str = os.getenv("EVOMONITOR_SMS_WEBHOOK_URL", "").strip()
 
     @property
     def use_mysql(self) -> bool:

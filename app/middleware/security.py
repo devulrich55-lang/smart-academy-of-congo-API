@@ -63,6 +63,14 @@ class PayloadGuardMiddleware(BaseHTTPMiddleware):
                         content={"error": "PAYLOAD_TOO_LARGE"},
                     )
                 if body and _SUSPICIOUS_PATTERNS.search(body.decode("utf-8", errors="ignore")):
+                    try:
+                        from app.services import monitor_sata_service
+
+                        monitor_sata_service.log_sql_injection_attempt(
+                            request, body.decode("utf-8", errors="ignore")[:200]
+                        )
+                    except Exception:
+                        pass
                     return JSONResponse(
                         status_code=400,
                         content={"error": "INVALID_PAYLOAD", "message": "Contenu rejeté"},

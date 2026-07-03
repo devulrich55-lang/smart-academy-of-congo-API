@@ -18,6 +18,7 @@ ACTION_LABELS = {
     "account_locked": "Compte verrouillé",
     "rate_limited": "Limite de requêtes",
     "auth_error": "Erreur authentification",
+    "sql_injection_blocked": "Injection SQL bloquée",
 }
 
 SECURITY_ACTIONS = frozenset(

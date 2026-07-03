@@ -1452,6 +1452,65 @@ def _migrate_monitor_incidents_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_monitor_metrics_snapshots_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS monitor_metrics_snapshots (
+                  id VARCHAR(80) PRIMARY KEY,
+                  cpu DOUBLE NULL,
+                  ram DOUBLE NULL,
+                  rpm DOUBLE NULL,
+                  latency_ms DOUBLE NULL,
+                  failure_rate DOUBLE NULL,
+                  response_ms DOUBLE NULL,
+                  online_users INT NULL,
+                  epm DOUBLE NULL,
+                  snapshot_json TEXT NULL,
+                  created_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        try:
+            cur.execute(
+                "CREATE INDEX idx_monitor_metrics_created ON monitor_metrics_snapshots(created_at)"
+            )
+            conn.commit()
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] not in (1061, 1060):
+                raise
+        cur.close()
+        return
+
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS monitor_metrics_snapshots (
+              id TEXT PRIMARY KEY,
+              cpu REAL,
+              ram REAL,
+              rpm REAL,
+              latency_ms REAL,
+              failure_rate REAL,
+              response_ms REAL,
+              online_users INTEGER,
+              epm REAL,
+              snapshot_json TEXT,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_monitor_metrics_created ON monitor_metrics_snapshots(created_at);
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_mobile_money_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1658,6 +1717,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_social_network_v2(conn, "mysql")
     _migrate_social_study_groups_table(conn, "mysql")
     _migrate_monitor_incidents_table(conn, "mysql")
+    _migrate_monitor_metrics_snapshots_table(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
@@ -1794,6 +1854,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_social_network_v2(conn, "sqlite")
     _migrate_social_study_groups_table(conn, "sqlite")
     _migrate_monitor_incidents_table(conn, "sqlite")
+    _migrate_monitor_metrics_snapshots_table(conn, "sqlite")
     _migrate_mobile_money_table(conn, "sqlite")
     _migrate_live_sessions_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")

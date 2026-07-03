@@ -854,7 +854,7 @@ def translate_dictionary_route(
 
 
 @router.get("/library/manage")
-def list_library_manage(user: dict = Depends(require_roles("ministere"))):
+def list_library_manage(user: dict = Depends(require_roles("ministere", "superadmin"))):
     try:
         return {"items": library_service.list_manage_books(user)}
     except ValueError as e:
@@ -862,7 +862,7 @@ def list_library_manage(user: dict = Depends(require_roles("ministere"))):
 
 
 @router.post("/library", status_code=201)
-def create_library_route(body: dict, user: dict = Depends(require_roles("ministere"))):
+def create_library_route(body: dict, user: dict = Depends(require_roles("ministere", "superadmin"))):
     try:
         item = library_service.create_book(user, body)
         return {"ok": True, "item": item}
@@ -872,7 +872,7 @@ def create_library_route(body: dict, user: dict = Depends(require_roles("ministe
 
 @router.patch("/library/{item_id}")
 def update_library_route(
-    item_id: str, body: dict, user: dict = Depends(require_roles("ministere"))
+    item_id: str, body: dict, user: dict = Depends(require_roles("ministere", "superadmin"))
 ):
     try:
         item = library_service.update_book(user, item_id, body)
@@ -882,7 +882,7 @@ def update_library_route(
 
 
 @router.delete("/library/{item_id}")
-def delete_library_route(item_id: str, user: dict = Depends(require_roles("ministere"))):
+def delete_library_route(item_id: str, user: dict = Depends(require_roles("ministere", "superadmin"))):
     try:
         return library_service.delete_book(user, item_id)
     except ValueError as e:
@@ -892,7 +892,7 @@ def delete_library_route(item_id: str, user: dict = Depends(require_roles("minis
 @router.post("/library/upload")
 async def upload_library_file_route(
     files: list[UploadFile] = File(...),
-    user: dict = Depends(require_roles("ministere")),
+    user: dict = Depends(require_roles("ministere", "superadmin")),
 ):
     del user
     saved = await _save_home_news_uploads(files)
