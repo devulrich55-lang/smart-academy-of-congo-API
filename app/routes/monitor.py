@@ -166,9 +166,8 @@ def monitor_ai_ops_update_ticket(
     body: dict,
     user: dict = Depends(require_roles("superadmin")),
 ):
-    del user
     try:
-        ticket = monitor_ai_ops_service.update_dev_ticket(ticket_id, body or {})
+        ticket = monitor_ai_ops_service.update_dev_ticket(ticket_id, body or {}, user)
         return {"ok": True, "ticket": ticket}
     except ValueError as e:
         _map_error(e)

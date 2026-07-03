@@ -39,12 +39,14 @@ def clean_role(role: str | None) -> str | None:
         "section",
         "ministere",
         "superadmin",
+        "developpeur",
+        "techmanager",
     }
     return role if role in allowed else None
 
 
 def clean_institutional_role(role: str | None) -> str | None:
-    allowed = {"superadmin", "ministere", "universite"}
+    allowed = {"superadmin", "ministere", "universite", "developpeur", "techmanager"}
     return role if role in allowed else None
 
 

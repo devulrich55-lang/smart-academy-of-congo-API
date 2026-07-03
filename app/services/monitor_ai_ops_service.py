@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.database import get_db
-from app.services import email_service, monitor_sata_service, monitor_service
+from app.services import email_service, monitor_sata_service, monitor_service, ticket_workflow_service
 from app.utils.platform_security import uid
 
-TICKET_STATUSES = frozenset({"open", "in_progress", "resolved", "closed"})
+TICKET_STATUSES = ticket_workflow_service.TICKET_STATUSES
 
 
 def _now() -> str:
@@ -286,12 +286,13 @@ def create_dev_ticket(actor: dict, payload: dict) -> dict:
     }
 
     db = get_db()
+    priority = ticket_workflow_service.normalize_priority(None, row["severity"])
     db.execute(
         """INSERT INTO monitor_dev_tickets
            (id, ticket_number, title, description, severity, service, status,
             error_context_json, analysis_json, corrective_code, assignee, created_by,
-            created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            created_at, updated_at, priority, project, time_spent_minutes)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             row["id"],
             row["ticket_number"],
@@ -307,6 +308,9 @@ def create_dev_ticket(actor: dict, payload: dict) -> dict:
             row["created_by"],
             row["created_at"],
             row["updated_at"],
+            priority,
+            row["service"],
+            0,
         ),
     )
     db.commit()
@@ -333,9 +337,14 @@ def create_dev_ticket(actor: dict, payload: dict) -> dict:
     except Exception as exc:
         print(f"[AI Ops] audit skip: {exc}")
 
+    row["priority"] = priority
+    row["project"] = row["service"]
+    row["time_spent_minutes"] = 0
     _notify_dev_team(row)
-
-    return _row_to_ticket(row)
+    ticket_workflow_service.log_history(
+        ticket_id, actor, "created", None, "open", {"ticketNumber": ticket_number}
+    )
+    return ticket_workflow_service.row_to_ticket(row)
 
 
 def _notify_dev_team(ticket: dict) -> None:
@@ -354,7 +363,7 @@ def _notify_dev_team(ticket: dict) -> None:
                     f"{ticket['description']}\n\n"
                     f"Code correctif suggéré :\n{ticket.get('corrective_code', '')[:1200]}"
                 ),
-                action_url=settings.frontend_url + "/dashboard-evomonitor.html",
+                action_url=settings.frontend_url + "/devcenter/",
             )
         except Exception as exc:
             print(f"[AI Ops] ticket email skip {addr}: {exc}")
@@ -367,64 +376,27 @@ def list_dev_tickets(limit: int = 50) -> list[dict]:
                ORDER BY created_at DESC LIMIT ?""",
             (max(1, min(limit, 200)),),
         ).fetchall()
-        return [_row_to_ticket(dict(r)) for r in rows]
+        return [ticket_workflow_service.row_to_ticket(dict(r)) for r in rows]
     except Exception:
         return []
 
 
-def update_dev_ticket(ticket_id: str, patch: dict) -> dict:
+def update_dev_ticket(ticket_id: str, patch: dict, actor: dict | None = None) -> dict:
     if not ticket_id:
         raise ValueError("INVALID_INPUT")
-    row = get_db().execute(
-        "SELECT * FROM monitor_dev_tickets WHERE id = ?", (ticket_id,)
-    ).fetchone()
-    if not row:
-        raise ValueError("NOT_FOUND")
-
-    status = patch.get("status")
-    assignee = patch.get("assignee")
-    updates: list[str] = []
-    params: list = []
-    if status and status in TICKET_STATUSES:
-        updates.append("status = ?")
-        params.append(status)
-    if assignee is not None:
-        updates.append("assignee = ?")
-        params.append(str(assignee).strip()[:255] or None)
-    if not updates:
-        return _row_to_ticket(dict(row))
-
-    updates.append("updated_at = ?")
-    params.append(_now())
-    params.append(ticket_id)
-    get_db().execute(
-        f"UPDATE monitor_dev_tickets SET {', '.join(updates)} WHERE id = ?",
-        tuple(params),
+    user = actor or {"email": "system", "role": "superadmin"}
+    return ticket_workflow_service.update_ticket_fields(
+        ticket_id,
+        user,
+        patch or {},
+        allow_assign=True,
+        allow_priority=user.get("role") in ("techmanager", "superadmin"),
+        allow_validate=user.get("role") in ("techmanager", "superadmin"),
     )
-    get_db().commit()
-    fresh = get_db().execute(
-        "SELECT * FROM monitor_dev_tickets WHERE id = ?", (ticket_id,)
-    ).fetchone()
-    return _row_to_ticket(dict(fresh))
 
 
 def _row_to_ticket(row: dict) -> dict:
-    return {
-        "id": row["id"],
-        "ticketNumber": row["ticket_number"],
-        "title": row["title"],
-        "description": row.get("description"),
-        "severity": row.get("severity"),
-        "service": row.get("service"),
-        "status": row.get("status"),
-        "errorContext": _json_load(row.get("error_context_json"), {}),
-        "analysis": _json_load(row.get("analysis_json"), {}),
-        "correctiveCode": row.get("corrective_code"),
-        "assignee": row.get("assignee"),
-        "createdBy": row.get("created_by"),
-        "createdAt": row.get("created_at"),
-        "updatedAt": row.get("updated_at"),
-    }
+    return ticket_workflow_service.row_to_ticket(row)
 
 
 def get_predictions() -> dict:

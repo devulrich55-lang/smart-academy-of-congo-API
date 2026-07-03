@@ -1352,12 +1352,14 @@ def revoke_all_refresh_tokens(user_id: str) -> None:
 
 
 CAMPUS_ROLES = ("etudiant", "professeur", "assistant", "section")
-INSTITUTIONAL_ROLES = ("superadmin", "ministere", "universite")
+INSTITUTIONAL_ROLES = ("superadmin", "ministere", "universite", "developpeur", "techmanager")
 MAX_SUPERADMIN_ACCOUNTS = 2
 ROLE_LABELS = {
     "superadmin": "Super Admin",
     "ministere": "Ministère",
     "universite": "Admin Université",
+    "developpeur": "Développeur",
+    "techmanager": "Responsable technique",
 }
 
 
@@ -1475,7 +1477,7 @@ def list_institutional_admins(actor: dict) -> list[dict]:
         ).fetchall()
     else:
         rows = db.execute(
-            "SELECT * FROM users WHERE role IN ('superadmin','ministere','universite') "
+            "SELECT * FROM users WHERE role IN ('superadmin','ministere','universite','developpeur','techmanager') "
             "ORDER BY role, email"
         ).fetchall()
     items = [_institutional_row(row_to_user(r)) for r in rows]
@@ -1582,6 +1584,10 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         if fonction:
             payload["fonction"] = fonction
         payload["countryCode"] = _require_country_code(profile)
+    if role == "developpeur":
+        payload["fonction"] = clean_text(profile.get("fonction"), 80) or "Développeur EvoSU"
+    if role == "techmanager":
+        payload["fonction"] = clean_text(profile.get("fonction"), 80) or "Responsable technique EvoSU"
     if role == "universite":
         campus = normalize_profile_campus(
             {

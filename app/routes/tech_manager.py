@@ -1,0 +1,130 @@
+from fastapi import APIRouter, Depends, Query
+
+from app.deps import require_roles
+from app.services import tech_manager_service, ticket_workflow_service
+
+router = APIRouter(prefix="/admin/tech-manager", tags=["tech-manager"])
+
+ERROR_MAP = {
+    "NOT_FOUND": (404, "Ticket introuvable"),
+    "INVALID_INPUT": (400, "Données invalides"),
+    "FORBIDDEN": (403, "Accès refusé"),
+}
+
+
+def _map_error(exc: ValueError) -> None:
+    from fastapi import HTTPException
+
+    code = str(exc)
+    if code in ERROR_MAP:
+        status, message = ERROR_MAP[code]
+        raise HTTPException(status_code=status, detail={"error": code, "message": message})
+    raise exc
+
+
+@router.get("/overview")
+def tech_manager_overview(user: dict = Depends(require_roles("techmanager", "superadmin"))):
+    return tech_manager_service.get_overview(user)
+
+
+@router.get("/tickets")
+def tech_manager_tickets(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+    filter: str = Query("all", alias="filter"),
+    limit: int = Query(150, ge=1, le=200),
+):
+    tickets = tech_manager_service.list_tickets(user, filter, limit)
+    return {"tickets": tickets, "count": len(tickets), "filter": filter}
+
+
+@router.post("/tickets/{ticket_id}/assign")
+def tech_manager_assign(
+    ticket_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    try:
+        ticket = tech_manager_service.assign_ticket(
+            user,
+            ticket_id,
+            (body or {}).get("assignee") or "",
+            (body or {}).get("priority"),
+        )
+        return {"ok": True, "ticket": ticket}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.patch("/tickets/{ticket_id}/priority")
+def tech_manager_priority(
+    ticket_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    try:
+        ticket = tech_manager_service.set_priority(
+            user, ticket_id, (body or {}).get("priority") or "medium"
+        )
+        return {"ok": True, "ticket": ticket}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/tickets/{ticket_id}/validate")
+def tech_manager_validate(
+    ticket_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    try:
+        ticket = tech_manager_service.validate_ticket(
+            user, ticket_id, approve=(body or {}).get("approve", True) is not False
+        )
+        return {"ok": True, "ticket": ticket}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/tickets/{ticket_id}/production")
+def tech_manager_production(
+    ticket_id: str,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    try:
+        ticket = tech_manager_service.approve_production(user, ticket_id)
+        return {"ok": True, "ticket": ticket}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.post("/tickets/{ticket_id}/resolve")
+def tech_manager_resolve(
+    ticket_id: str,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    try:
+        ticket = tech_manager_service.resolve_ticket(user, ticket_id)
+        return {"ok": True, "ticket": ticket}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/team")
+def tech_manager_team(user: dict = Depends(require_roles("techmanager", "superadmin"))):
+    return {"developers": tech_manager_service.list_team(user)}
+
+
+@router.get("/stats")
+def tech_manager_stats(user: dict = Depends(require_roles("techmanager", "superadmin"))):
+    return tech_manager_service.team_stats(user)
+
+
+@router.get("/workflow")
+def tech_manager_workflow(
+    user: dict = Depends(require_roles("techmanager", "superadmin", "developpeur")),
+):
+    del user
+    return {
+        "chain": ticket_workflow_service.WORKFLOW_CHAIN,
+        "labels": ticket_workflow_service.STATUS_LABELS,
+    }

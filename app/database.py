@@ -1579,6 +1579,189 @@ def _migrate_monitor_dev_tickets_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_dev_center_profiles_table(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS dev_center_profiles (
+                  user_email VARCHAR(255) PRIMARY KEY,
+                  bio TEXT NULL,
+                  speciality VARCHAR(120) NULL,
+                  stack_json TEXT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        cur.close()
+        return
+
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dev_center_profiles (
+              user_email TEXT PRIMARY KEY,
+              bio TEXT,
+              speciality TEXT,
+              stack_json TEXT,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_users_developpeur_role_sqlite(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    ddl = row["sql"] if row else ""
+    if "'developpeur'" in ddl:
+        return
+
+    cols = conn.execute("PRAGMA table_info(users)").fetchall()
+    if not cols:
+        return
+
+    parts: list[str] = []
+    for col in cols:
+        _cid, name, ctype, notnull, default, pk = col
+        if name == "role":
+            parts.append(
+                "role TEXT NOT NULL CHECK (role IN "
+                "('etudiant','professeur','assistant','universite','section',"
+                "'ministere','superadmin','developpeur'))"
+            )
+            continue
+        col_def = f"{name} {ctype or 'TEXT'}"
+        if pk:
+            col_def += " PRIMARY KEY"
+        elif notnull:
+            col_def += " NOT NULL"
+        if default is not None:
+            col_def += f" DEFAULT {default}"
+        parts.append(col_def)
+
+    col_names = ", ".join(c[1] for c in cols)
+    conn.execute(f"CREATE TABLE users_new ({', '.join(parts)})")
+    conn.execute(f"INSERT INTO users_new ({col_names}) SELECT {col_names} FROM users")
+    conn.execute("DROP TABLE users")
+    conn.execute("ALTER TABLE users_new RENAME TO users")
+
+
+def _migrate_ticket_workflow_tables(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        for col_sql in (
+            "ALTER TABLE monitor_dev_tickets ADD COLUMN priority VARCHAR(20) DEFAULT 'medium'",
+            "ALTER TABLE monitor_dev_tickets ADD COLUMN project VARCHAR(80) NULL",
+            "ALTER TABLE monitor_dev_tickets ADD COLUMN validated_by VARCHAR(255) NULL",
+            "ALTER TABLE monitor_dev_tickets ADD COLUMN validated_at VARCHAR(40) NULL",
+            "ALTER TABLE monitor_dev_tickets ADD COLUMN time_spent_minutes INT DEFAULT 0",
+        ):
+            try:
+                cur.execute(col_sql)
+                conn.commit()
+            except pymysql.err.OperationalError:
+                pass
+        for ddl in (
+            """CREATE TABLE IF NOT EXISTS monitor_ticket_comments (
+              id VARCHAR(80) PRIMARY KEY, ticket_id VARCHAR(80) NOT NULL,
+              author_email VARCHAR(255) NOT NULL, author_name VARCHAR(200) NULL,
+              body TEXT NOT NULL, created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+            """CREATE TABLE IF NOT EXISTS monitor_ticket_history (
+              id VARCHAR(80) PRIMARY KEY, ticket_id VARCHAR(80) NOT NULL,
+              actor_email VARCHAR(255) NULL, actor_name VARCHAR(200) NULL,
+              action VARCHAR(60) NOT NULL, from_status VARCHAR(20) NULL,
+              to_status VARCHAR(20) NULL, meta_json TEXT NULL, created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+            """CREATE TABLE IF NOT EXISTS monitor_ticket_time_entries (
+              id VARCHAR(80) PRIMARY KEY, ticket_id VARCHAR(80) NOT NULL,
+              developer_email VARCHAR(255) NOT NULL, developer_name VARCHAR(200) NULL,
+              minutes INT NOT NULL, note TEXT NULL, created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci""",
+        ):
+            try:
+                cur.execute(ddl)
+                conn.commit()
+            except pymysql.err.OperationalError:
+                pass
+        cur.close()
+        return
+
+    for stmt in (
+        "ALTER TABLE monitor_dev_tickets ADD COLUMN priority TEXT DEFAULT 'medium'",
+        "ALTER TABLE monitor_dev_tickets ADD COLUMN project TEXT",
+        "ALTER TABLE monitor_dev_tickets ADD COLUMN validated_by TEXT",
+        "ALTER TABLE monitor_dev_tickets ADD COLUMN validated_at TEXT",
+        "ALTER TABLE monitor_dev_tickets ADD COLUMN time_spent_minutes INTEGER DEFAULT 0",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS monitor_ticket_comments (
+              id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, author_email TEXT NOT NULL,
+              author_name TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS monitor_ticket_history (
+              id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, actor_email TEXT, actor_name TEXT,
+              action TEXT NOT NULL, from_status TEXT, to_status TEXT, meta_json TEXT,
+              created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS monitor_ticket_time_entries (
+              id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, developer_email TEXT NOT NULL,
+              developer_name TEXT, minutes INTEGER NOT NULL, note TEXT, created_at TEXT NOT NULL);
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_users_techmanager_role_sqlite(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    ddl = row["sql"] if row else ""
+    if "'techmanager'" in ddl:
+        return
+    cols = conn.execute("PRAGMA table_info(users)").fetchall()
+    if not cols:
+        return
+    parts: list[str] = []
+    for col in cols:
+        _cid, name, ctype, notnull, default, pk = col
+        if name == "role":
+            parts.append(
+                "role TEXT NOT NULL CHECK (role IN "
+                "('etudiant','professeur','assistant','universite','section',"
+                "'ministere','superadmin','developpeur','techmanager'))"
+            )
+            continue
+        col_def = f"{name} {ctype or 'TEXT'}"
+        if pk:
+            col_def += " PRIMARY KEY"
+        elif notnull:
+            col_def += " NOT NULL"
+        if default is not None:
+            col_def += f" DEFAULT {default}"
+        parts.append(col_def)
+    col_names = ", ".join(c[1] for c in cols)
+    conn.execute(f"CREATE TABLE users_new ({', '.join(parts)})")
+    conn.execute(f"INSERT INTO users_new ({col_names}) SELECT {col_names} FROM users")
+    conn.execute("DROP TABLE users")
+    conn.execute("ALTER TABLE users_new RENAME TO users")
+
+
 def _migrate_mobile_money_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1787,6 +1970,8 @@ def _connect_mysql() -> SACDatabase:
     _migrate_monitor_incidents_table(conn, "mysql")
     _migrate_monitor_metrics_snapshots_table(conn, "mysql")
     _migrate_monitor_dev_tickets_table(conn, "mysql")
+    _migrate_dev_center_profiles_table(conn, "mysql")
+    _migrate_ticket_workflow_tables(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
@@ -1925,9 +2110,13 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_monitor_incidents_table(conn, "sqlite")
     _migrate_monitor_metrics_snapshots_table(conn, "sqlite")
     _migrate_monitor_dev_tickets_table(conn, "sqlite")
+    _migrate_dev_center_profiles_table(conn, "sqlite")
+    _migrate_ticket_workflow_tables(conn, "sqlite")
     _migrate_mobile_money_table(conn, "sqlite")
     _migrate_live_sessions_table(conn, "sqlite")
     _migrate_reset_code_column(conn, "sqlite")
+    _migrate_users_developpeur_role_sqlite(conn)
+    _migrate_users_techmanager_role_sqlite(conn)
     conn.commit()
     return SACDatabase(conn, "sqlite")
 
