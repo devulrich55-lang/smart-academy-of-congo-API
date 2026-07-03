@@ -308,7 +308,6 @@ def restore_backup(backup_id: str, confirm: str) -> dict:
                 shutil.rmtree(settings.upload_dir)
             shutil.copytree(uploads_src, settings.upload_dir)
 
-        global _db
         from app import database as db_mod
 
         db_mod._db = None
