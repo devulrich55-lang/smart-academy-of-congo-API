@@ -9,16 +9,20 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
+import uuid as uuid_mod
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import settings
-from app.utils.platform_security import uid
 
-BACKUP_ID_RE = re.compile(r"^evosu-backup-[a-z0-9-]+$")
+BACKUP_ID_RE = re.compile(r"^evosu-backup-[a-z0-9]+$")
 CONFIRM_PREFIX = "RESTAURER"
+
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
 
 
 def _now_iso() -> str:
@@ -71,15 +75,24 @@ def _sqlite_backup(dest: Path) -> None:
     if not src.exists():
         raise FileNotFoundError(f"Base SQLite introuvable: {src}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    src_conn = sqlite3.connect(str(src))
-    try:
-        dst_conn = sqlite3.connect(str(dest))
+    last_err = None
+    for attempt in range(4):
         try:
-            src_conn.backup(dst_conn)
-        finally:
-            dst_conn.close()
-    finally:
-        src_conn.close()
+            src_conn = sqlite3.connect(str(src), timeout=30)
+            try:
+                dst_conn = sqlite3.connect(str(dest))
+                try:
+                    src_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    src_conn.backup(dst_conn)
+                finally:
+                    dst_conn.close()
+            finally:
+                src_conn.close()
+            return
+        except sqlite3.OperationalError as exc:
+            last_err = exc
+            time.sleep(0.5 * (attempt + 1))
+    raise RuntimeError(f"SQLITE_BACKUP_LOCKED: {last_err}")
 
 
 def _mysql_dump(dest: Path) -> None:
@@ -122,8 +135,9 @@ def _build_manifest(trigger: str, backup_id: str) -> dict:
 def create_backup(trigger: str = "manual") -> dict:
     """Crée une archive ZIP complète (DB + uploads + manifest)."""
     trigger = trigger if trigger in ("auto", "manual", "pre_restore") else "manual"
-    backup_id = f"evosu-backup-{uid()[:12]}"
+    backup_id = f"evosu-backup-{uuid_mod.uuid4().hex[:12]}"
     archive = _backup_path(backup_id)
+    backup_dir().mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="evosu-bak-") as tmp:
         tmp_path = Path(tmp)
@@ -153,7 +167,7 @@ def create_backup(trigger: str = "manual") -> dict:
             encoding="utf-8",
         )
 
-        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as zf:
             for file in tmp_path.rglob("*"):
                 if file.is_file():
                     zf.write(file, file.relative_to(tmp_path).as_posix())
@@ -341,3 +355,43 @@ def get_backup_file(backup_id: str) -> Path:
     if not path.exists():
         raise ValueError("NOT_FOUND")
     return path
+
+
+def start_backup_job(trigger: str = "manual") -> str:
+    job_id = uuid_mod.uuid4().hex[:16]
+
+    def _run() -> None:
+        with _jobs_lock:
+            _jobs[job_id] = {
+                "status": "running",
+                "trigger": trigger,
+                "startedAt": _now_iso(),
+            }
+        try:
+            row = create_backup(trigger=trigger)
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "done",
+                    "trigger": trigger,
+                    "backup": row,
+                    "finishedAt": _now_iso(),
+                }
+        except Exception as exc:
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "error",
+                    "trigger": trigger,
+                    "message": str(exc),
+                    "finishedAt": _now_iso(),
+                }
+
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "queued", "trigger": trigger, "startedAt": _now_iso()}
+    threading.Thread(target=_run, daemon=True, name=f"backup-{job_id}").start()
+    return job_id
+
+
+def get_backup_job(job_id: str) -> dict:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        return dict(job) if job else {"status": "unknown", "jobId": job_id}

@@ -15,6 +15,7 @@ ERROR_MAP = {
     "INVALID_BACKUP": (400, "Archive de sauvegarde corrompue ou incomplète"),
     "CONFIRM_REQUIRED": (400, "Confirmation requise — saisissez RESTAURER-{id}"),
     "MYSQL_DUMP_FAILED": (503, "Export MySQL indisponible (mysqldump requis)"),
+    "SQLITE_BACKUP_LOCKED": (503, "Base occupée — réessayez dans quelques secondes"),
 }
 
 
@@ -39,25 +40,29 @@ def backup_list(user: dict = Depends(require_roles("superadmin"))):
     return {"backups": backup_service.list_backups(), "status": status}
 
 
-@router.post("", status_code=201)
-@limiter.limit("10/hour")
+@router.post("", status_code=202)
+@router.post("/create", status_code=202)
+@limiter.limit("20/hour")
 def backup_create(request: Request, user: dict = Depends(require_roles("superadmin"))):
+    del user
     try:
-        row = backup_service.create_backup(trigger="manual")
+        job_id = backup_service.start_backup_job(trigger="manual")
         audit_service.log_audit(
             request,
             "create_backup",
             "backup",
-            resource_id=row.get("id"),
-            meta={"trigger": "manual", "sizeBytes": row.get("sizeBytes")},
+            resource_id=job_id,
+            meta={"trigger": "manual", "async": True},
         )
-        return {"ok": True, "backup": row, "status": backup_service.get_status()}
-    except RuntimeError as e:
-        if str(e) == "MYSQL_DUMP_FAILED":
-            _map_error(ValueError("MYSQL_DUMP_FAILED"))
-        raise
+        return {"ok": True, "jobId": job_id, "status": "running"}
     except ValueError as e:
         _map_error(e)
+
+
+@router.get("/jobs/{job_id}")
+def backup_job_status(job_id: str, user: dict = Depends(require_roles("superadmin"))):
+    del user
+    return {"ok": True, "job": backup_service.get_backup_job(job_id)}
 
 
 @router.post("/purge")
