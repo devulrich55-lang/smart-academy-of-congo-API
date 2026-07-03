@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from passlib.context import CryptContext
 
 from app.config import settings
-from app.database import get_db, row_to_user
+from app.database import get_db, is_duplicate_key_error, row_to_user
 from app.services import email_service
 from app.utils.campus_catalog import get_by_id, normalize_profile_campus, registered_campus, resolve_campus_id
 from app.utils.sanitize import (
@@ -341,55 +341,63 @@ def create_user(profile: dict) -> dict:
             if sec:
                 section_id = sec["id"]
 
-    get_db().execute(
-        """INSERT INTO users (
-          id, email, password_hash, role, prenom, nom, telephone, universite,
-          filiere, niveau, matricule, date_naissance, departement, grade, service,
-          fonction, num_employe, num_assist, nom_universite, sigle, ville, adresse,
-          nb_etudiants, site_web, responsable, code_uni, cours_classes, payment,
-          inscription_fee, classe, section_id, logo_url, country_code, created_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            user_id,
-            email,
-            password_hash,
-            role,
-            clean_text(profile.get("prenom"), 100) or None,
-            clean_text(profile.get("nom"), 150) or None,
-            phone_normalized,
-            universite_locked,
-            clean_text(profile.get("filiere"), 200) or None,
-            profile.get("niveau"),
-            clean_text(profile.get("matricule"), 50) or None,
-            profile.get("dateNaissance"),
-            clean_text(profile.get("departement"), 200) or None,
-            clean_text(profile.get("grade"), 50) or None,
-            clean_text(profile.get("service"), 50) or None,
-            clean_text(profile.get("fonction"), 50) or None,
-            clean_text(profile.get("numEmploye"), 50) or None,
-            clean_text(profile.get("numAssist"), 50) or None,
-            clean_text(profile.get("nomUniversite"), 200) or None,
-            clean_text(profile.get("sigle"), 30) or None,
-            clean_text(profile.get("ville"), 100) or None,
-            clean_text(profile.get("adresse"), 300) or None,
-            clean_text(profile.get("nbEtudiants"), 20) or None,
-            clean_text(profile.get("siteWeb"), 200) if profile.get("siteWeb") else None,
-            clean_text(profile.get("responsable"), 150) or None,
-            clean_text(profile.get("codeUni"), 50) or None,
-            json.dumps(profile.get("coursClasses") or []),
-            json.dumps(profile["payment"]) if profile.get("payment") else None,
-            json.dumps(profile["inscriptionFee"])
-            if profile.get("inscriptionFee")
-            else None,
-            clean_text(profile.get("classe"), 150) or None,
-            section_id,
-            _clean_logo_url(profile.get("logoUrl")),
-            _resolve_country_code(profile),
-            now,
-            now,
-        ),
-    )
-    get_db().commit()
+    try:
+        get_db().execute(
+            """INSERT INTO users (
+              id, email, password_hash, role, prenom, nom, telephone, universite,
+              filiere, niveau, matricule, date_naissance, departement, grade, service,
+              fonction, num_employe, num_assist, nom_universite, sigle, ville, adresse,
+              nb_etudiants, site_web, responsable, code_uni, cours_classes, payment,
+              inscription_fee, classe, section_id, logo_url, country_code, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                user_id,
+                email,
+                password_hash,
+                role,
+                clean_text(profile.get("prenom"), 100) or None,
+                clean_text(profile.get("nom"), 150) or None,
+                phone_normalized,
+                universite_locked,
+                clean_text(profile.get("filiere"), 200) or None,
+                profile.get("niveau"),
+                clean_text(profile.get("matricule"), 50) or None,
+                profile.get("dateNaissance"),
+                clean_text(profile.get("departement"), 200) or None,
+                clean_text(profile.get("grade"), 50) or None,
+                clean_text(profile.get("service"), 50) or None,
+                clean_text(profile.get("fonction"), 50) or None,
+                clean_text(profile.get("numEmploye"), 50) or None,
+                clean_text(profile.get("numAssist"), 50) or None,
+                clean_text(profile.get("nomUniversite"), 200) or None,
+                clean_text(profile.get("sigle"), 30) or None,
+                clean_text(profile.get("ville"), 100) or None,
+                clean_text(profile.get("adresse"), 300) or None,
+                clean_text(profile.get("nbEtudiants"), 20) or None,
+                clean_text(profile.get("siteWeb"), 200) if profile.get("siteWeb") else None,
+                clean_text(profile.get("responsable"), 150) or None,
+                clean_text(profile.get("codeUni"), 50) or None,
+                json.dumps(profile.get("coursClasses") or []),
+                json.dumps(profile["payment"]) if profile.get("payment") else None,
+                json.dumps(profile["inscriptionFee"])
+                if profile.get("inscriptionFee")
+                else None,
+                clean_text(profile.get("classe"), 150) or None,
+                section_id,
+                _clean_logo_url(profile.get("logoUrl")),
+                _resolve_country_code(profile),
+                now,
+                now,
+            ),
+        )
+        get_db().commit()
+    except Exception as exc:
+        msg = str(exc).upper()
+        if is_duplicate_key_error(exc):
+            raise ValueError("EMAIL_EXISTS") from exc
+        if "CHECK CONSTRAINT" in msg or "CHK_USERS_ROLE" in msg:
+            raise ValueError("DB_ROLE_CONSTRAINT") from exc
+        raise
     created = find_user_by_id(user_id)
     if created and role == "etudiant":
         from app.services.reclamation_service import find_section_for_student
@@ -1611,6 +1619,8 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         )
         payload["countryCode"] = _require_country_code(profile)
     created = create_user(payload)
+    if not created:
+        raise ValueError("CREATE_FAILED")
     if created and role == "universite":
         faculty_sections = profile.get("facultySections") or []
         if faculty_sections:
@@ -1621,7 +1631,7 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
                 payload.get("universite") or "",
                 faculty_sections,
             )
-    return _institutional_row(created) if created else {}
+    return _institutional_row(created)
 
 
 def seed_faculty_sections_for_campus(campus: str, rows: list) -> list[dict]:

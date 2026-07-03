@@ -1663,10 +1663,35 @@ def _migrate_users_roles_mysql(conn) -> None:
     )
     cur = conn.cursor()
     try:
-        cur.execute("ALTER TABLE users DROP CHECK chk_users_role")
-        conn.commit()
+        cur.execute("SHOW CREATE TABLE users")
+        row = cur.fetchone()
+        ddl = (row[1] if row and len(row) > 1 else "") or ""
+        if "'developpeur'" in ddl and "'techmanager'" in ddl:
+            return
     except pymysql.err.OperationalError:
         pass
+    try:
+        cur.execute(
+            """
+            SELECT CONSTRAINT_NAME
+            FROM information_schema.TABLE_CONSTRAINTS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'users'
+              AND CONSTRAINT_TYPE = 'CHECK'
+            """
+        )
+        for (name,) in cur.fetchall():
+            try:
+                cur.execute(f"ALTER TABLE users DROP CHECK `{name}`")
+                conn.commit()
+            except pymysql.err.OperationalError:
+                pass
+    except pymysql.err.OperationalError:
+        try:
+            cur.execute("ALTER TABLE users DROP CHECK chk_users_role")
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
     try:
         cur.execute(
             f"ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ({roles}))"

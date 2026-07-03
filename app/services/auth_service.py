@@ -23,6 +23,9 @@ from app.utils.tokens import (
 
 
 REFRESH_DAYS = 7
+INSTITUTIONAL_PORTAL_ROLES = frozenset(
+    {"ministere", "superadmin", "developpeur", "techmanager"}
+)
 
 
 def _store_refresh_token(user_id: str, refresh_raw: str) -> str:
@@ -72,9 +75,9 @@ def login(
         raise ValueError("ROLE_MISMATCH")
 
     if options.get("adminPortal"):
-        if user["role"] not in ("ministere", "superadmin"):
+        if user["role"] not in INSTITUTIONAL_PORTAL_ROLES:
             raise ValueError("ROLE_MISMATCH")
-    elif user["role"] in ("ministere", "superadmin"):
+    elif user["role"] in INSTITUTIONAL_PORTAL_ROLES:
         raise ValueError("ADMIN_PORTAL_REQUIRED")
 
     registered_uni = registered_campus(user)

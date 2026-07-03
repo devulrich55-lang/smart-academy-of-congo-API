@@ -43,6 +43,11 @@ ERROR_MAP = {
         403,
         "Limite atteinte : maximum 2 comptes Super Admin autorisés sur la plateforme.",
     ),
+    "DB_ROLE_CONSTRAINT": (
+        500,
+        "Rôle non autorisé en base — redéployez l'API (API-1) pour activer Développeur / Tech Manager.",
+    ),
+    "CREATE_FAILED": (500, "Création du compte impossible — réessayez ou consultez les logs API."),
 }
 
 
