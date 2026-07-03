@@ -349,8 +349,13 @@ def seed_tech_team_if_missing() -> None:
     for item in seeds:
         if find_user_by_email(item["email"]):
             continue
-        create_user({**item, "password": TECH_TEAM_PASSWORD})
-        created.append(f"{item['email']} ({item['role']})")
+        try:
+            create_user({**item, "password": TECH_TEAM_PASSWORD})
+            created.append(f"{item['email']} ({item['role']})")
+        except ValueError as exc:
+            print(f"[SAC] Seed tech ignoré ({item['email']}): {exc}")
+        except Exception as exc:
+            print(f"[SAC] Seed tech erreur ({item['email']}): {exc}")
     if created:
         print(
             "[SAC] Équipe tech créée:",

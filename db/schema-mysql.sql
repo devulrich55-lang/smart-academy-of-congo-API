@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at VARCHAR(40) NOT NULL,
   updated_at VARCHAR(40) NOT NULL,
   UNIQUE KEY uq_users_email (email),
-  CONSTRAINT chk_users_role CHECK (role IN ('etudiant','professeur','assistant','universite','section'))
+  CONSTRAINT chk_users_role CHECK (role IN ('etudiant','professeur','assistant','universite','section','ministere','superadmin','developpeur','techmanager'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX idx_users_role ON users(role);

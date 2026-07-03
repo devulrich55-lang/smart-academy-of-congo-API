@@ -192,7 +192,7 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
     phone = clean_phone(profile.get("telephone"))
     role = clean_role(profile.get("role"))
 
-    if role in ("ministere", "superadmin"):
+    if role in ("ministere", "superadmin", "developpeur", "techmanager"):
         if not phone:
             phone = None
         elif find_user_by_phone(phone):
@@ -246,7 +246,7 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
     for row in get_db().execute(
         "SELECT email, role, prenom, nom FROM users"
     ).fetchall():
-        if row["role"] in ("universite", "ministere", "superadmin"):
+        if row["role"] in ("universite", "ministere", "superadmin", "developpeur", "techmanager"):
             continue
         if norm_person_key(row["prenom"], row["nom"]) == key and row["role"] != role:
             raise ValueError("MULTI_ROLE")

@@ -1636,7 +1636,7 @@ def _migrate_users_developpeur_role_sqlite(conn: sqlite3.Connection) -> None:
             parts.append(
                 "role TEXT NOT NULL CHECK (role IN "
                 "('etudiant','professeur','assistant','universite','section',"
-                "'ministere','superadmin','developpeur'))"
+                "'ministere','superadmin','developpeur','techmanager'))"
             )
             continue
         col_def = f"{name} {ctype or 'TEXT'}"
@@ -1653,6 +1653,28 @@ def _migrate_users_developpeur_role_sqlite(conn: sqlite3.Connection) -> None:
     conn.execute(f"INSERT INTO users_new ({col_names}) SELECT {col_names} FROM users")
     conn.execute("DROP TABLE users")
     conn.execute("ALTER TABLE users_new RENAME TO users")
+
+
+def _migrate_users_roles_mysql(conn) -> None:
+    """Étend le CHECK role MySQL (developpeur, techmanager, admin…)."""
+    roles = (
+        "'etudiant','professeur','assistant','universite','section',"
+        "'ministere','superadmin','developpeur','techmanager'"
+    )
+    cur = conn.cursor()
+    try:
+        cur.execute("ALTER TABLE users DROP CHECK chk_users_role")
+        conn.commit()
+    except pymysql.err.OperationalError:
+        pass
+    try:
+        cur.execute(
+            f"ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN ({roles}))"
+        )
+        conn.commit()
+    except pymysql.err.OperationalError:
+        pass
+    cur.close()
 
 
 def _migrate_ticket_workflow_tables(conn, backend: str) -> None:
@@ -1974,6 +1996,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_ticket_workflow_tables(conn, "mysql")
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
+    _migrate_users_roles_mysql(conn)
     return SACDatabase(conn, "mysql")
 
 
