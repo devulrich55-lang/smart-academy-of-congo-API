@@ -230,12 +230,12 @@ def seed_demo_sections_if_missing() -> None:
 
 
 INSTITUTIONAL_PASSWORD = "Admin2025!"
-SUPERADMIN_SEED_EMAIL = "devulrich55@gmail.com"
+SUPERADMIN_SEED_EMAIL = "djemcibamba@gmail.com"
 SUPERADMIN_SEED_PASSWORD = "Ulrich11+"
 LEGACY_SUPERADMIN_EMAILS = (
     "ulrichcibamba55@gmail.com",
+    "devulrich55@gmail.com",
     "admin@superadmin.cd",
-    "djemcibamba@gmail.com",
 )
 
 
