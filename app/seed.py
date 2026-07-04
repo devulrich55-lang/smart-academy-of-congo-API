@@ -245,30 +245,36 @@ def _ensure_superadmin_seed() -> None:
     from app.services.user_service import create_user, find_user_by_email, update_password
     from datetime import datetime, timezone
 
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    target = find_user_by_email(SUPERADMIN_SEED_EMAIL)
+
+    for legacy_email in LEGACY_SUPERADMIN_EMAILS:
+        if legacy_email.lower() == SUPERADMIN_SEED_EMAIL.lower():
+            continue
+        legacy = find_user_by_email(legacy_email)
+        if not legacy or legacy.get("role") != "superadmin":
+            continue
+        if target and target.get("id") != legacy.get("id"):
+            db.execute("DELETE FROM users WHERE id = ?", (legacy["id"],))
+            db.commit()
+            print("[SAC] Super Admin doublon supprimé:", legacy_email)
+            continue
+        db.execute(
+            "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
+            (SUPERADMIN_SEED_EMAIL, now, legacy["id"]),
+        )
+        db.commit()
+        update_password(legacy["id"], SUPERADMIN_SEED_PASSWORD)
+        target = find_user_by_email(SUPERADMIN_SEED_EMAIL)
+        print("[SAC] Super Admin migré:", legacy_email, "→", SUPERADMIN_SEED_EMAIL)
+
     target = find_user_by_email(SUPERADMIN_SEED_EMAIL)
     if target and target.get("role") == "superadmin":
         update_password(target["id"], SUPERADMIN_SEED_PASSWORD)
         return
 
-    for legacy_email in LEGACY_SUPERADMIN_EMAILS:
-        legacy = find_user_by_email(legacy_email)
-        if legacy and legacy.get("role") == "superadmin":
-            now = datetime.now(timezone.utc).isoformat()
-            get_db().execute(
-                "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
-                (SUPERADMIN_SEED_EMAIL, now, legacy["id"]),
-            )
-            get_db().commit()
-            update_password(legacy["id"], SUPERADMIN_SEED_PASSWORD)
-            print(
-                "[SAC] Super Admin migré:",
-                legacy_email,
-                "→",
-                SUPERADMIN_SEED_EMAIL,
-            )
-            return
-
-    super_count = get_db().execute(
+    super_count = db.execute(
         "SELECT COUNT(*) AS c FROM users WHERE role = 'superadmin'"
     ).fetchone()["c"]
     if super_count >= 2:

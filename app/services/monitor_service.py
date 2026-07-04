@@ -543,10 +543,11 @@ def _alert_recipients() -> list[str]:
         rows = get_db().execute(
             "SELECT email FROM users WHERE role = 'superadmin' AND email IS NOT NULL"
         ).fetchall()
+        blocked = {"ulrichcibamba55@gmail.com"}
         return [
             str(r["email"]).strip().lower()
             for r in rows
-            if r["email"]
+            if r["email"] and str(r["email"]).strip().lower() not in blocked
         ]
     except Exception:
         return []

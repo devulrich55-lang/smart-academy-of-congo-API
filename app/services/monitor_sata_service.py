@@ -546,13 +546,28 @@ def _send_whatsapp_webhook(message: str, phone: str | None = None, severity: str
         return False
 
 
-def _send_alert_email(message: str, severity: str) -> dict:
-    recipients = list(settings.evomonitor_alert_emails)
-    if not recipients:
+def _alert_email_recipients() -> list[str]:
+    if settings.evomonitor_alert_emails:
+        return list(settings.evomonitor_alert_emails)
+    try:
         rows = get_db().execute(
             "SELECT email FROM users WHERE role = 'superadmin' AND email IS NOT NULL"
         ).fetchall()
-        recipients = [str(r["email"]).strip().lower() for r in rows if r["email"]]
+        blocked = {"ulrichcibamba55@gmail.com"}
+        out = []
+        for row in rows:
+            addr = str(row["email"]).strip().lower()
+            if addr and addr not in blocked:
+                out.append(addr)
+        return out
+    except Exception:
+        return []
+
+
+def _send_alert_email(message: str, severity: str) -> dict:
+    recipients = _alert_email_recipients()
+    if not recipients:
+        return {"ok": False, "emailsSent": 0, "note": "Aucun destinataire e-mail configuré"}
     count = 0
     for addr in recipients[:5]:
         if email_service.send_platform_notification_email(
@@ -580,6 +595,10 @@ def dispatch_alert(payload: dict) -> dict:
         out = _send_alert_email(message, severity)
         sent["ok"] = out["ok"]
         sent["emailsSent"] = out.get("emailsSent", 0)
+        if out.get("note"):
+            sent["note"] = out["note"]
+        elif out.get("emailsSent", 0) == 0:
+            sent["note"] = "SMTP non configuré ou envoi échoué — vérifiez GMAIL_* sur Render"
     elif channel == "telegram":
         sent["ok"] = _send_telegram(
             f"<b>EvoMonitor</b> [{severity}]\n{message}",
@@ -628,6 +647,7 @@ def alerts_config_status() -> dict:
         "email": {
             "smtpConfigured": email_service.smtp_configured(),
             "alertEmails": len(settings.evomonitor_alert_emails),
+            "recipients": _alert_email_recipients()[:5],
         },
         "telegram": {
             "configured": bool(
