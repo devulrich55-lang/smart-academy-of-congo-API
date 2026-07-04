@@ -89,6 +89,12 @@ def monitor_heal(
         _map_error(e)
 
 
+@router.get("/alerts/status")
+def monitor_alerts_status(user: dict = Depends(require_roles("superadmin"))):
+    del user
+    return monitor_sata_service.alerts_config_status()
+
+
 @router.post("/alerts/dispatch")
 def monitor_dispatch_alert(
     body: dict,

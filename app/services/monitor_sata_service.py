@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -446,13 +447,24 @@ def _infobip_base_url() -> str:
     return f"https://{base}"
 
 
-def _send_infobip_whatsapp(message: str, phone: str | None = None) -> bool:
-    api_key = settings.infobip_api_key
+def _infobip_auth_header() -> str:
+    key = (settings.infobip_api_key or "").strip()
+    if not key:
+        return ""
+    if key.lower().startswith("app "):
+        return key
+    return f"App {key}"
+
+
+def _send_infobip_whatsapp(message: str, phone: str | None = None) -> tuple[bool, str | None]:
+    auth = _infobip_auth_header()
     base_url = _infobip_base_url()
     to_digits = _normalize_phone_digits(phone)
     sender = _normalize_phone_digits(settings.infobip_whatsapp_from) or "447860099299"
-    if not api_key or not base_url or not to_digits:
-        return False
+    if not auth or not base_url:
+        return False, "INFOBIP_API_KEY ou INFOBIP_BASE_URL manquant sur Render"
+    if not to_digits:
+        return False, "Numéro destinataire manquant"
     payload = json.dumps(
         {
             "from": sender,
@@ -466,26 +478,45 @@ def _send_infobip_whatsapp(message: str, phone: str | None = None) -> bool:
             url,
             data=payload,
             headers={
-                "Authorization": f"App {api_key}",
+                "Authorization": auth,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=12) as res:
-            return 200 <= res.status < 300
+            raw = res.read().decode("utf-8", errors="ignore")
+            if not (200 <= res.status < 300):
+                return False, raw[:240] or f"HTTP {res.status}"
+            try:
+                data = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                data = {}
+            messages = data.get("messages") if isinstance(data, dict) else None
+            if isinstance(messages, list) and messages:
+                st = messages[0].get("status") if isinstance(messages[0], dict) else {}
+                name = (st or {}).get("name") or (st or {}).get("description")
+                if name and str(name).upper().startswith(("REJECT", "UNDELIVER", "FAILED")):
+                    return False, str(name)[:240]
+            return True, None
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="ignore")[:240]
+        print(f"[SATA] Infobip WhatsApp HTTP {exc.code}: {body}")
+        return False, body or f"HTTP {exc.code}"
     except Exception as exc:
         print(f"[SATA] Infobip WhatsApp skip: {exc}")
-        return False
+        return False, str(exc)[:240]
 
 
-def _send_whatsapp(message: str, phone: str | None = None, severity: str = "info") -> tuple[bool, str]:
+def _send_whatsapp(message: str, phone: str | None = None, severity: str = "info") -> tuple[bool, str, str | None]:
     text = message if message.startswith("EvoMonitor") else f"EvoMonitor [{severity}]: {message}"
     if _infobip_whatsapp_configured():
-        return _send_infobip_whatsapp(text, phone), "infobip"
+        ok, detail = _send_infobip_whatsapp(text, phone)
+        return ok, "infobip", detail
     if settings.evomonitor_whatsapp_webhook_url:
-        return _send_whatsapp_webhook(text, phone=phone, severity=severity), "webhook"
-    return False, "none"
+        ok = _send_whatsapp_webhook(text, phone=phone, severity=severity)
+        return ok, "webhook", None if ok else "Webhook WhatsApp en échec"
+    return False, "none", "Configurez INFOBIP_API_KEY et INFOBIP_BASE_URL sur Render"
 
 
 def _send_whatsapp_webhook(message: str, phone: str | None = None, severity: str = "info") -> bool:
@@ -567,10 +598,12 @@ def dispatch_alert(payload: dict) -> dict:
         if not whatsapp_phone:
             sent["note"] = "Numéro WhatsApp manquant"
         else:
-            ok, provider = _send_whatsapp(message, phone=whatsapp_phone, severity=severity)
+            ok, provider, detail = _send_whatsapp(message, phone=whatsapp_phone, severity=severity)
             sent["ok"] = ok
             sent["provider"] = provider
-            if not ok and provider == "none":
+            if detail:
+                sent["note"] = detail
+            elif not ok and provider == "none":
                 sent["note"] = "Configurez INFOBIP_API_KEY et INFOBIP_BASE_URL sur Render"
     elif channel == "dashboard":
         sent["ok"] = True
@@ -582,6 +615,28 @@ def dispatch_alert(payload: dict) -> dict:
         sent["note"] = f"Canal inconnu: {channel}"
 
     return sent
+
+
+def alerts_config_status() -> dict:
+    """État de configuration serveur des canaux (sans secrets)."""
+    return {
+        "infobip": {
+            "configured": _infobip_whatsapp_configured(),
+            "baseUrl": settings.infobip_base_url or None,
+            "whatsappFrom": settings.infobip_whatsapp_from or "447860099299",
+        },
+        "email": {
+            "smtpConfigured": email_service.smtp_configured(),
+            "alertEmails": len(settings.evomonitor_alert_emails),
+        },
+        "telegram": {
+            "configured": bool(
+                settings.evomonitor_telegram_bot_token and settings.evomonitor_telegram_chat_id
+            ),
+        },
+        "smsWebhook": bool(settings.evomonitor_sms_webhook_url),
+        "whatsappWebhook": bool(settings.evomonitor_whatsapp_webhook_url),
+    }
 
 
 def test_alert_channels(payload: dict) -> dict:
@@ -616,6 +671,8 @@ def test_alert_channels(payload: dict) -> dict:
         "tested": len(results),
         "succeeded": ok_count,
         "results": results,
+        "infobipConfigured": _infobip_whatsapp_configured(),
+        "whatsappFrom": settings.infobip_whatsapp_from,
     }
 
 
