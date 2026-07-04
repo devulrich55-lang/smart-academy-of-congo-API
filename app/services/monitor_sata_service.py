@@ -384,14 +384,14 @@ def update_incident(actor: dict, incident_id: str, patch: dict) -> dict:
     return incident
 
 
-def _send_telegram(message: str) -> bool:
+def _send_telegram(message: str, chat_id: str | None = None) -> bool:
     token = settings.evomonitor_telegram_bot_token
-    chat_id = settings.evomonitor_telegram_chat_id
-    if not token or not chat_id:
+    cid = (chat_id or settings.evomonitor_telegram_chat_id or "").strip()
+    if not token or not cid:
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = urllib.parse.urlencode(
-        {"chat_id": chat_id, "text": message[:4000], "parse_mode": "HTML"}
+        {"chat_id": cid, "text": message[:4000], "parse_mode": "HTML"}
     ).encode()
     try:
         req = urllib.request.Request(url, data=data, method="POST")
@@ -402,11 +402,18 @@ def _send_telegram(message: str) -> bool:
         return False
 
 
-def _send_sms_webhook(message: str) -> bool:
+def _send_sms_webhook(message: str, phone: str | None = None, severity: str = "info") -> bool:
     url = settings.evomonitor_sms_webhook_url
     if not url:
         return False
-    payload = json.dumps({"message": message[:500], "source": "evomonitor"}).encode()
+    payload = json.dumps(
+        {
+            "message": message[:500],
+            "phone": (phone or "").strip(),
+            "severity": severity,
+            "source": "evomonitor",
+        }
+    ).encode()
     try:
         req = urllib.request.Request(
             url,
@@ -421,36 +428,135 @@ def _send_sms_webhook(message: str) -> bool:
         return False
 
 
+def _send_whatsapp_webhook(message: str, phone: str | None = None, severity: str = "info") -> bool:
+    url = settings.evomonitor_whatsapp_webhook_url
+    if not url:
+        return False
+    payload = json.dumps(
+        {
+            "message": message[:500],
+            "phone": (phone or "").strip(),
+            "severity": severity,
+            "source": "evomonitor",
+            "channel": "whatsapp",
+        }
+    ).encode()
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as res:
+            return 200 <= res.status < 300
+    except Exception as exc:
+        print(f"[SATA] WhatsApp webhook skip: {exc}")
+        return False
+
+
+def _send_alert_email(message: str, severity: str) -> dict:
+    recipients = list(settings.evomonitor_alert_emails)
+    if not recipients:
+        rows = get_db().execute(
+            "SELECT email FROM users WHERE role = 'superadmin' AND email IS NOT NULL"
+        ).fetchall()
+        recipients = [str(r["email"]).strip().lower() for r in rows if r["email"]]
+    count = 0
+    for addr in recipients[:5]:
+        if email_service.send_platform_notification_email(
+            addr,
+            f"EvoMonitor — {severity}",
+            message,
+            settings.frontend_url + "/evomonitor/",
+        ):
+            count += 1
+    return {"ok": count > 0, "emailsSent": count}
+
+
 def dispatch_alert(payload: dict) -> dict:
     channel = (payload.get("channel") or "dashboard").lower()
     message = str(payload.get("message") or payload.get("title") or "Alerte EvoMonitor")
     severity = str(payload.get("severity") or "info")
+    telegram_chat = str(payload.get("telegramChatId") or payload.get("chatId") or "").strip()
+    sms_phone = str(payload.get("smsPhone") or payload.get("phone") or "").strip()
+    whatsapp_phone = str(
+        payload.get("whatsappPhone") or payload.get("smsPhone") or payload.get("phone") or ""
+    ).strip()
     sent = {"channel": channel, "ok": False}
 
     if channel == "email":
-        recipients = settings.evomonitor_alert_emails
-        if not recipients:
-            rows = get_db().execute(
-                "SELECT email FROM users WHERE role = 'superadmin' AND email IS NOT NULL"
-            ).fetchall()
-            recipients = [r["email"] for r in rows if r["email"]]
-        count = 0
-        for addr in recipients[:5]:
-            if email_service.send_platform_notification_email(
-                addr, f"EvoMonitor — {severity}", message, settings.frontend_url + "/evomonitor/"
-            ):
-                count += 1
-        sent["ok"] = count > 0
-        sent["emailsSent"] = count
+        out = _send_alert_email(message, severity)
+        sent["ok"] = out["ok"]
+        sent["emailsSent"] = out.get("emailsSent", 0)
     elif channel == "telegram":
-        sent["ok"] = _send_telegram(f"<b>EvoMonitor</b> [{severity}]\n{message}")
+        sent["ok"] = _send_telegram(
+            f"<b>EvoMonitor</b> [{severity}]\n{message}",
+            chat_id=telegram_chat or None,
+        )
     elif channel == "sms":
-        sent["ok"] = _send_sms_webhook(f"EvoMonitor [{severity}]: {message}")
-    else:
+        if not sms_phone:
+            sent["note"] = "Numéro SMS manquant"
+        else:
+            sent["ok"] = _send_sms_webhook(
+                f"EvoMonitor [{severity}]: {message}",
+                phone=sms_phone,
+                severity=severity,
+            )
+    elif channel == "whatsapp":
+        if not whatsapp_phone:
+            sent["note"] = "Numéro WhatsApp manquant"
+        else:
+            sent["ok"] = _send_whatsapp_webhook(
+                f"EvoMonitor [{severity}]: {message}",
+                phone=whatsapp_phone,
+                severity=severity,
+            )
+    elif channel == "dashboard":
         sent["ok"] = True
-        sent["note"] = "Notification dashboard uniquement"
+        sent["note"] = "Notification dashboard (client)"
+    elif channel == "push":
+        sent["ok"] = True
+        sent["note"] = "Push navigateur (client)"
+    else:
+        sent["note"] = f"Canal inconnu: {channel}"
 
     return sent
+
+
+def test_alert_channels(payload: dict) -> dict:
+    """Envoie un message test sur les canaux demandés (Super Admin)."""
+    message = str(
+        payload.get("message")
+        or "Test canaux d'alerte EvoMonitor — configuration OK."
+    )
+    severity = str(payload.get("severity") or "warning")
+    channels = payload.get("channels") or [
+        "email",
+        "telegram",
+        "sms",
+        "whatsapp",
+    ]
+    results = []
+    for ch in channels:
+        item = dispatch_alert(
+            {
+                "channel": str(ch).lower(),
+                "message": message,
+                "severity": severity if str(ch).lower() != "sms" else "critical",
+                "telegramChatId": payload.get("telegramChatId"),
+                "smsPhone": payload.get("smsPhone"),
+                "whatsappPhone": payload.get("whatsappPhone") or payload.get("smsPhone"),
+            }
+        )
+        results.append(item)
+    ok_count = sum(1 for r in results if r.get("ok"))
+    return {
+        "ok": ok_count > 0,
+        "tested": len(results),
+        "succeeded": ok_count,
+        "results": results,
+    }
 
 
 def trigger_heal(action: str) -> dict:

@@ -98,6 +98,15 @@ def monitor_dispatch_alert(
     return monitor_sata_service.dispatch_alert(body or {})
 
 
+@router.post("/alerts/test")
+def monitor_test_alerts(
+    body: dict,
+    user: dict = Depends(require_roles("superadmin")),
+):
+    del user
+    return monitor_sata_service.test_alert_channels(body or {})
+
+
 @router.post("/simulate")
 def monitor_simulate(
     body: dict,
