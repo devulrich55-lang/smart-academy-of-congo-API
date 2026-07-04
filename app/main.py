@@ -63,7 +63,10 @@ async def lifespan(_app: FastAPI):
     )
     seed_if_empty()
     seed_demo_sections_if_missing()
-    seed_institutional_admins_if_missing()
+    try:
+        seed_institutional_admins_if_missing()
+    except Exception as exc:
+        print(f"[SAC] seed_institutional_admins_if_missing ignoré: {exc}")
     try:
         seed_tech_team_if_missing()
     except Exception as exc:

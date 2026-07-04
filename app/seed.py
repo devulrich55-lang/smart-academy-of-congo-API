@@ -240,7 +240,7 @@ LEGACY_SUPERADMIN_EMAILS = (
 
 
 def _ensure_superadmin_seed() -> None:
-    """Compte Super Admin principal — création ou migration depuis un ancien seed."""
+    """Compte Super Admin principal — création, promotion ou migration depuis un ancien seed."""
     from app.database import get_db
     from app.services.user_service import create_user, find_user_by_email, update_password
     from datetime import datetime, timezone
@@ -260,6 +260,11 @@ def _ensure_superadmin_seed() -> None:
             db.commit()
             print("[SAC] Super Admin doublon supprimé:", legacy_email)
             continue
+        if target:
+            db.execute("DELETE FROM users WHERE id = ?", (legacy["id"],))
+            db.commit()
+            print("[SAC] Super Admin legacy supprimé (compte cible existe):", legacy_email)
+            continue
         db.execute(
             "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
             (SUPERADMIN_SEED_EMAIL, now, legacy["id"]),
@@ -270,7 +275,26 @@ def _ensure_superadmin_seed() -> None:
         print("[SAC] Super Admin migré:", legacy_email, "→", SUPERADMIN_SEED_EMAIL)
 
     target = find_user_by_email(SUPERADMIN_SEED_EMAIL)
-    if target and target.get("role") == "superadmin":
+    if target:
+        if target.get("role") != "superadmin":
+            db.execute(
+                """UPDATE users SET role = 'superadmin', prenom = ?, nom = ?, updated_at = ?
+                   WHERE id = ?""",
+                (
+                    target.get("prenom") or "Ulrich",
+                    target.get("nom") or "Admin SAC",
+                    now,
+                    target["id"],
+                ),
+            )
+            db.commit()
+            print(
+                "[SAC] Compte promu Super Admin:",
+                SUPERADMIN_SEED_EMAIL,
+                "(ancien rôle:",
+                target.get("role"),
+                ")",
+            )
         update_password(target["id"], SUPERADMIN_SEED_PASSWORD)
         return
 
@@ -280,17 +304,31 @@ def _ensure_superadmin_seed() -> None:
     if super_count >= 2:
         return
 
-    create_user(
-        {
-            "email": SUPERADMIN_SEED_EMAIL,
-            "password": SUPERADMIN_SEED_PASSWORD,
-            "role": "superadmin",
-            "prenom": "Ulrich",
-            "nom": "Admin SAC",
-            "telephone": "+243 81 100 0001",
-        }
-    )
-    print("[SAC] Compte Super Admin créé:", SUPERADMIN_SEED_EMAIL)
+    try:
+        create_user(
+            {
+                "email": SUPERADMIN_SEED_EMAIL,
+                "password": SUPERADMIN_SEED_PASSWORD,
+                "role": "superadmin",
+                "prenom": "Ulrich",
+                "nom": "Admin SAC",
+                "telephone": "+243 81 100 0001",
+            }
+        )
+        print("[SAC] Compte Super Admin créé:", SUPERADMIN_SEED_EMAIL)
+    except ValueError as exc:
+        existing = find_user_by_email(SUPERADMIN_SEED_EMAIL)
+        if existing and str(exc) in ("EMAIL_EXISTS", "IDENTITY_CONFLICT"):
+            db.execute(
+                """UPDATE users SET role = 'superadmin', prenom = ?, nom = ?, updated_at = ?
+                   WHERE id = ?""",
+                ("Ulrich", "Admin SAC", now, existing["id"]),
+            )
+            db.commit()
+            update_password(existing["id"], SUPERADMIN_SEED_PASSWORD)
+            print("[SAC] Compte existant promu Super Admin:", SUPERADMIN_SEED_EMAIL)
+            return
+        print(f"[SAC] Super Admin seed ignoré ({SUPERADMIN_SEED_EMAIL}): {exc}")
 
 
 def seed_institutional_admins_if_missing() -> None:
