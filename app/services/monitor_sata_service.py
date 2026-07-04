@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -428,6 +429,65 @@ def _send_sms_webhook(message: str, phone: str | None = None, severity: str = "i
         return False
 
 
+def _normalize_phone_digits(phone: str | None) -> str:
+    return re.sub(r"\D", "", str(phone or ""))
+
+
+def _infobip_whatsapp_configured() -> bool:
+    return bool(settings.infobip_api_key and settings.infobip_base_url)
+
+
+def _infobip_base_url() -> str:
+    base = (settings.infobip_base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.startswith("http://") or base.startswith("https://"):
+        return base
+    return f"https://{base}"
+
+
+def _send_infobip_whatsapp(message: str, phone: str | None = None) -> bool:
+    api_key = settings.infobip_api_key
+    base_url = _infobip_base_url()
+    to_digits = _normalize_phone_digits(phone)
+    sender = _normalize_phone_digits(settings.infobip_whatsapp_from) or "447860099299"
+    if not api_key or not base_url or not to_digits:
+        return False
+    payload = json.dumps(
+        {
+            "from": sender,
+            "to": to_digits,
+            "content": {"text": message[:4096]},
+        }
+    ).encode()
+    url = f"{base_url}/whatsapp/1/message/text"
+    try:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "Authorization": f"App {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=12) as res:
+            return 200 <= res.status < 300
+    except Exception as exc:
+        print(f"[SATA] Infobip WhatsApp skip: {exc}")
+        return False
+
+
+def _send_whatsapp(message: str, phone: str | None = None, severity: str = "info") -> tuple[bool, str]:
+    text = message if message.startswith("EvoMonitor") else f"EvoMonitor [{severity}]: {message}"
+    if _infobip_whatsapp_configured():
+        return _send_infobip_whatsapp(text, phone), "infobip"
+    if settings.evomonitor_whatsapp_webhook_url:
+        return _send_whatsapp_webhook(text, phone=phone, severity=severity), "webhook"
+    return False, "none"
+
+
 def _send_whatsapp_webhook(message: str, phone: str | None = None, severity: str = "info") -> bool:
     url = settings.evomonitor_whatsapp_webhook_url
     if not url:
@@ -507,11 +567,11 @@ def dispatch_alert(payload: dict) -> dict:
         if not whatsapp_phone:
             sent["note"] = "Numéro WhatsApp manquant"
         else:
-            sent["ok"] = _send_whatsapp_webhook(
-                f"EvoMonitor [{severity}]: {message}",
-                phone=whatsapp_phone,
-                severity=severity,
-            )
+            ok, provider = _send_whatsapp(message, phone=whatsapp_phone, severity=severity)
+            sent["ok"] = ok
+            sent["provider"] = provider
+            if not ok and provider == "none":
+                sent["note"] = "Configurez INFOBIP_API_KEY et INFOBIP_BASE_URL sur Render"
     elif channel == "dashboard":
         sent["ok"] = True
         sent["note"] = "Notification dashboard (client)"

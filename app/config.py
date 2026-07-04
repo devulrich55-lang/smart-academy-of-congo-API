@@ -130,6 +130,9 @@ class Settings:
     evomonitor_telegram_chat_id: str = os.getenv("EVOMONITOR_TELEGRAM_CHAT_ID", "").strip()
     evomonitor_sms_webhook_url: str = os.getenv("EVOMONITOR_SMS_WEBHOOK_URL", "").strip()
     evomonitor_whatsapp_webhook_url: str = os.getenv("EVOMONITOR_WHATSAPP_WEBHOOK_URL", "").strip()
+    infobip_api_key: str = os.getenv("INFOBIP_API_KEY", "").strip()
+    infobip_base_url: str = os.getenv("INFOBIP_BASE_URL", "").strip()
+    infobip_whatsapp_from: str = os.getenv("INFOBIP_WHATSAPP_FROM", "447860099299").strip()
     evomonitor_ai_ops_use_llm: bool = os.getenv("EVOMONITOR_AI_OPS_USE_LLM", "true").lower() == "true"
     evomonitor_dev_ticket_emails: list[str] = [
         e.strip().lower()
