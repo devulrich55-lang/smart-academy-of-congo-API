@@ -666,6 +666,9 @@ def record_http_denial(request, status_code: int) -> None:
         return
     if status_code == 401:
         return
+    # Refus d'auth attendus sur l'API EvoMonitor (poll sans JWT, rôle insuffisant).
+    if "/admin/monitor/" in path:
+        return
     action = "access_denied"
     if status_code == 423:
         action = "account_locked"
@@ -696,6 +699,9 @@ def scan_recent_security_events(within_seconds: int | None = None) -> list[dict]
     ).fetchall()
     alerts = []
     for row in rows:
+        resource = row["resource"] or "api"
+        if "/admin/monitor/" in str(resource):
+            continue
         meta = _json_load(row["meta"] if "meta" in row.keys() else None, {})
 
         class _Req:
