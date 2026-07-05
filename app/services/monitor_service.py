@@ -670,12 +670,17 @@ def record_http_denial(request, status_code: int) -> None:
     # Refus d'auth attendus sur l'API EvoMonitor (poll sans JWT, rôle insuffisant).
     if "/admin/monitor/" in path:
         return
+    # Tech Manager / Dev Center — route protégée ; 403 sans session = bruit normal.
+    if "/admin/tech-manager/" in path or "/admin/dev-center/" in path:
+        return
+    user = getattr(request.state, "user", None)
+    if status_code == 403 and not user:
+        return
     action = "access_denied"
     if status_code == 423:
         action = "account_locked"
     elif status_code == 429:
         action = "rate_limited"
-    user = getattr(request.state, "user", None)
     on_security_event(
         request,
         action,
