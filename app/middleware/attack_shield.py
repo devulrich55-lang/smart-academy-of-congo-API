@@ -10,6 +10,10 @@ from app.services import attack_shield_service
 
 class AttackShieldMiddleware(BaseHTTPMiddleware):
     SKIP_PREFIXES = ("/uploads", "/docs", "/redoc", "/openapi.json")
+    SAFE_API_PREFIXES = (
+        "/api/auth/",
+        "/api/health",
+    )
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if not settings.attack_shield_enabled:
@@ -19,6 +23,8 @@ class AttackShieldMiddleware(BaseHTTPMiddleware):
         if path.endswith("/health") or "/health" in path:
             return await call_next(request)
         if any(path.startswith(p) for p in self.SKIP_PREFIXES):
+            return await call_next(request)
+        if any(path.startswith(p) for p in self.SAFE_API_PREFIXES):
             return await call_next(request)
         if "/admin/tech-manager/" in path:
             return await call_next(request)

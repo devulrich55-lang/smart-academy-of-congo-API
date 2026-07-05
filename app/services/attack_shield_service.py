@@ -159,7 +159,8 @@ def score_request(request, *, body_preview: str = "") -> tuple[int, list[str], s
         score += 35
         reasons.append("suspicious_path")
 
-    if path.startswith("/api/admin/") and not request.headers.get("authorization"):
+    auth_header = (request.headers.get("authorization") or "").strip()
+    if path.startswith("/api/admin/") and not auth_header:
         score += 18
         reasons.append("admin_without_auth")
 
