@@ -20,7 +20,7 @@ class AttackShieldMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if any(path.startswith(p) for p in self.SKIP_PREFIXES):
             return await call_next(request)
-        if "/admin/tech-manager/shield" in path:
+        if "/admin/tech-manager/" in path:
             return await call_next(request)
 
         if not path.startswith("/api/"):
