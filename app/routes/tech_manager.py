@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.deps import require_roles
-from app.services import tech_manager_service, ticket_workflow_service
+from app.services import attack_shield_service, tech_manager_service, ticket_workflow_service
 
 router = APIRouter(prefix="/admin/tech-manager", tags=["tech-manager"])
 
@@ -128,3 +128,53 @@ def tech_manager_workflow(
         "chain": ticket_workflow_service.WORKFLOW_CHAIN,
         "labels": ticket_workflow_service.STATUS_LABELS,
     }
+
+
+@router.get("/shield/overview")
+def tech_manager_shield_overview(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    del user
+    return attack_shield_service.get_overview()
+
+
+@router.get("/shield/events")
+def tech_manager_shield_events(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+    limit: int = Query(50, ge=1, le=200),
+):
+    del user
+    events = attack_shield_service.list_events(limit)
+    return {"events": events, "count": len(events)}
+
+
+@router.get("/shield/blocked")
+def tech_manager_shield_blocked(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    del user
+    blocked = attack_shield_service.list_blocked()
+    return {"blocked": blocked, "count": len(blocked)}
+
+
+@router.get("/shield/honeypot")
+def tech_manager_shield_honeypot(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+    limit: int = Query(50, ge=1, le=200),
+):
+    del user
+    hits = attack_shield_service.list_honeypot_hits(limit)
+    return {"hits": hits, "count": len(hits)}
+
+
+@router.post("/shield/unblock/{ip_hash}")
+def tech_manager_shield_unblock(
+    ip_hash: str,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    del user
+    try:
+        attack_shield_service.unblock_ip(ip_hash)
+        return {"ok": True, "ipHash": ip_hash}
+    except ValueError as e:
+        _map_error(e)

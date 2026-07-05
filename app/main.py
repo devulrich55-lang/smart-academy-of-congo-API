@@ -24,6 +24,7 @@ from app.database import get_db
 from app.database_maintenance import run_maintenance
 from app.services.email_service import smtp_configured
 
+from app.middleware.attack_shield import AttackShieldMiddleware
 from app.middleware.security import (
 
     OriginGuardMiddleware,
@@ -160,6 +161,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(OriginGuardMiddleware)
 
 app.add_middleware(PayloadGuardMiddleware)
+
+app.add_middleware(AttackShieldMiddleware)
 
 
 

@@ -1394,6 +1394,116 @@ def _migrate_social_study_groups_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_attack_shield_tables(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS attack_events (
+                  id VARCHAR(80) PRIMARY KEY,
+                  ip_hash VARCHAR(32) NOT NULL,
+                  ip_masked VARCHAR(45) NULL,
+                  method VARCHAR(10) NULL,
+                  path TEXT NULL,
+                  user_agent TEXT NULL,
+                  score INT NOT NULL,
+                  action VARCHAR(20) NOT NULL,
+                  reasons_json TEXT NULL,
+                  blocked_until VARCHAR(40) NULL,
+                  created_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS blocked_ips (
+                  ip_hash VARCHAR(32) PRIMARY KEY,
+                  ip_masked VARCHAR(45) NULL,
+                  score INT NULL,
+                  reason TEXT NULL,
+                  blocked_until VARCHAR(40) NOT NULL,
+                  hit_count INT NOT NULL DEFAULT 1,
+                  created_at VARCHAR(40) NOT NULL,
+                  updated_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS honeypot_hits (
+                  id VARCHAR(80) PRIMARY KEY,
+                  ip_hash VARCHAR(32) NOT NULL,
+                  path TEXT NULL,
+                  user_agent TEXT NULL,
+                  payload_snippet TEXT NULL,
+                  created_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+        except pymysql.err.OperationalError:
+            pass
+        for idx_sql in (
+            "CREATE INDEX idx_attack_events_created ON attack_events(created_at)",
+            "CREATE INDEX idx_attack_events_ip ON attack_events(ip_hash, created_at)",
+            "CREATE INDEX idx_blocked_ips_until ON blocked_ips(blocked_until)",
+            "CREATE INDEX idx_honeypot_created ON honeypot_hits(created_at)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS attack_events (
+              id TEXT PRIMARY KEY,
+              ip_hash TEXT NOT NULL,
+              ip_masked TEXT,
+              method TEXT,
+              path TEXT,
+              user_agent TEXT,
+              score INTEGER NOT NULL,
+              action TEXT NOT NULL,
+              reasons_json TEXT,
+              blocked_until TEXT,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS blocked_ips (
+              ip_hash TEXT PRIMARY KEY,
+              ip_masked TEXT,
+              score INTEGER,
+              reason TEXT,
+              blocked_until TEXT NOT NULL,
+              hit_count INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS honeypot_hits (
+              id TEXT PRIMARY KEY,
+              ip_hash TEXT NOT NULL,
+              path TEXT,
+              user_agent TEXT,
+              payload_snippet TEXT,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_attack_events_created ON attack_events(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_attack_events_ip ON attack_events(ip_hash, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_blocked_ips_until ON blocked_ips(blocked_until);
+            CREATE INDEX IF NOT EXISTS idx_honeypot_created ON honeypot_hits(created_at DESC);
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_monitor_incidents_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -2049,6 +2159,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_mobile_money_table(conn, "mysql")
     _migrate_live_sessions_table(conn, "mysql")
     _migrate_users_roles_mysql(conn)
+    _migrate_attack_shield_tables(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -2192,6 +2303,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_reset_code_column(conn, "sqlite")
     _migrate_users_developpeur_role_sqlite(conn)
     _migrate_users_techmanager_role_sqlite(conn)
+    _migrate_attack_shield_tables(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
 

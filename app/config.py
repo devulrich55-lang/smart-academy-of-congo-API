@@ -143,6 +143,21 @@ class Settings:
         for e in os.getenv("EVOMONITOR_DEV_TICKET_EMAIL", "").split(",")
         if e.strip()
     ]
+    attack_shield_enabled: bool = (
+        os.getenv("ATTACK_SHIELD_ENABLED", "true").lower() != "false"
+    )
+    attack_shield_throttle_threshold: int = int(
+        os.getenv("ATTACK_SHIELD_THROTTLE_THRESHOLD", "40")
+    )
+    attack_shield_block_threshold: int = int(
+        os.getenv("ATTACK_SHIELD_BLOCK_THRESHOLD", "70")
+    )
+    attack_shield_honeypot_threshold: int = int(
+        os.getenv("ATTACK_SHIELD_HONEYPOT_THRESHOLD", "90")
+    )
+    attack_shield_block_minutes: int = int(
+        os.getenv("ATTACK_SHIELD_BLOCK_MINUTES", "60")
+    )
 
     @property
     def use_mysql(self) -> bool:
