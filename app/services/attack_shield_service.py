@@ -248,7 +248,92 @@ def log_event(
         ),
     )
     get_db().commit()
+    _maybe_dispatch_alert(score, action, mask_ip(ip), path, reasons, event_id)
     return event_id
+
+
+def _maybe_dispatch_alert(
+    score: int,
+    action: str,
+    ip_masked: str,
+    path: str,
+    reasons: list[str],
+    event_id: str,
+) -> None:
+    if not settings.attack_shield_alerts_enabled:
+        return
+    if action not in (ACTION_BLOCK, ACTION_HONEYPOT):
+        return
+    if score < settings.attack_shield_alert_min_score:
+        return
+    fingerprint = f"{action}:{ip_masked}:{path[:80]}"
+    if _recent_shield_alert_exists(fingerprint, within_seconds=600):
+        return
+
+    action_label = "Blocage IP" if action == ACTION_BLOCK else "Piège honeypot"
+    message = (
+        f"Bouclier anti-attaque — {action_label}\n"
+        f"Score : {score}/100\n"
+        f"IP : {ip_masked}\n"
+        f"Chemin : {path[:200]}\n"
+        f"Raisons : {', '.join(reasons[:5]) or '—'}"
+    )
+    channels: dict[str, dict] = {}
+    try:
+        from app.services import monitor_sata_service
+
+        channels["email"] = monitor_sata_service.dispatch_alert(
+            {"channel": "email", "message": message, "severity": "critical"}
+        )
+        phone = settings.attack_shield_alert_whatsapp_phone
+        if phone:
+            channels["whatsapp"] = monitor_sata_service.dispatch_alert(
+                {
+                    "channel": "whatsapp",
+                    "message": message,
+                    "severity": "critical",
+                    "whatsappPhone": phone,
+                }
+            )
+    except Exception as exc:
+        print(f"[AttackShield] alert dispatch skip: {exc}")
+
+    try:
+        get_db().execute(
+            """INSERT INTO attack_shield_alert_log
+               (id, event_id, action, score, ip_masked, path, channels_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                uid("shalert"),
+                event_id,
+                action,
+                score,
+                ip_masked,
+                path[:500],
+                json.dumps({"fingerprint": fingerprint, "channels": channels}, ensure_ascii=False),
+                _now(),
+            ),
+        )
+        get_db().commit()
+    except Exception:
+        pass
+
+
+def _recent_shield_alert_exists(fingerprint: str, within_seconds: int = 600) -> bool:
+    since = (datetime.now(timezone.utc) - timedelta(seconds=within_seconds)).isoformat()
+    try:
+        rows = get_db().execute(
+            """SELECT channels_json FROM attack_shield_alert_log
+               WHERE created_at >= ? ORDER BY created_at DESC LIMIT 30""",
+            (since,),
+        ).fetchall()
+        for row in rows:
+            meta = _json_load(row["channels_json"], {})
+            if meta.get("fingerprint") == fingerprint:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _upsert_blocked(
@@ -347,8 +432,191 @@ def get_overview() -> dict:
         "honeypot24h": honeypot_24h,
         "avgScore24h": avg_score,
         "byAction24h": by_action,
+        "alertsEnabled": settings.attack_shield_alerts_enabled,
+        "alertMinScore": settings.attack_shield_alert_min_score,
         "updatedAt": _now(),
     }
+
+
+def get_pulse(since: str | None = None) -> dict:
+    since_iso = since or (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    db = get_db()
+    new_count = int(
+        db.execute(
+            "SELECT COUNT(*) AS c FROM attack_events WHERE created_at >= ?",
+            (since_iso,),
+        ).fetchone()["c"]
+    )
+    rows = db.execute(
+        """SELECT * FROM attack_events
+           WHERE created_at >= ?
+           ORDER BY created_at DESC LIMIT 15""",
+        (since_iso,),
+    ).fetchall()
+    blocked = int(
+        db.execute(
+            "SELECT COUNT(*) AS c FROM blocked_ips WHERE blocked_until > ?",
+            (_now(),),
+        ).fetchone()["c"]
+    )
+    return {
+        "since": since_iso,
+        "newEvents": new_count,
+        "blockedActive": blocked,
+        "events": [_row_to_event(r) for r in rows],
+        "updatedAt": _now(),
+    }
+
+
+def get_trends(hours: int = 24) -> dict:
+    hours = max(1, min(hours, 72))
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    db = get_db()
+
+    hourly_rows = db.execute(
+        """SELECT substr(created_at, 1, 13) AS hour_key, action, COUNT(*) AS c
+           FROM attack_events
+           WHERE created_at >= ?
+           GROUP BY hour_key, action
+           ORDER BY hour_key ASC""",
+        (since,),
+    ).fetchall()
+    hourly_map: dict[str, dict] = {}
+    for row in hourly_rows:
+        key = row["hour_key"]
+        if key not in hourly_map:
+            hourly_map[key] = {"hour": key, "total": 0, "block": 0, "honeypot": 0, "throttle": 0}
+        cnt = int(row["c"])
+        hourly_map[key]["total"] += cnt
+        action = row["action"]
+        if action in hourly_map[key]:
+            hourly_map[key][action] += cnt
+    hourly = sorted(hourly_map.values(), key=lambda x: x["hour"])
+
+    top_paths_rows = db.execute(
+        """SELECT path, COUNT(*) AS c, MAX(score) AS max_score
+           FROM attack_events WHERE created_at >= ?
+           GROUP BY path ORDER BY c DESC LIMIT 8""",
+        (since,),
+    ).fetchall()
+    top_paths = [
+        {"path": r["path"], "count": int(r["c"]), "maxScore": int(r["max_score"] or 0)}
+        for r in top_paths_rows
+    ]
+
+    top_ips_rows = db.execute(
+        """SELECT ip_hash, ip_masked, COUNT(*) AS c, MAX(score) AS max_score
+           FROM attack_events WHERE created_at >= ?
+           GROUP BY ip_hash ORDER BY c DESC LIMIT 8""",
+        (since,),
+    ).fetchall()
+    top_ips = [
+        {
+            "ipHash": r["ip_hash"],
+            "ipMasked": r["ip_masked"],
+            "count": int(r["c"]),
+            "maxScore": int(r["max_score"] or 0),
+        }
+        for r in top_ips_rows
+    ]
+
+    alert_rows = db.execute(
+        """SELECT id, action, score, ip_masked, path, created_at
+           FROM attack_shield_alert_log
+           WHERE created_at >= ?
+           ORDER BY created_at DESC LIMIT 10""",
+        (since,),
+    ).fetchall()
+    recent_alerts = [
+        {
+            "id": r["id"],
+            "action": r["action"],
+            "score": int(r["score"]),
+            "ipMasked": r["ip_masked"],
+            "path": r["path"],
+            "createdAt": r["created_at"],
+        }
+        for r in alert_rows
+    ]
+
+    return {
+        "hours": hours,
+        "hourly": hourly,
+        "topPaths": top_paths,
+        "topIps": top_ips,
+        "recentAlerts": recent_alerts,
+        "updatedAt": _now(),
+    }
+
+
+def manual_block_ip(ip: str, reason: str = "manual_block", minutes: int | None = None) -> dict:
+    ip = str(ip or "").strip()
+    if not ip:
+        raise ValueError("INVALID_INPUT")
+    ip_hash = hash_ip(ip) or ""
+    if not ip_hash:
+        raise ValueError("INVALID_INPUT")
+    block_min = minutes or settings.attack_shield_block_minutes
+    blocked_until = (
+        datetime.now(timezone.utc) + timedelta(minutes=block_min)
+    ).isoformat()
+    _upsert_blocked(ip_hash, mask_ip(ip), 100, reason[:500], blocked_until)
+    get_db().commit()
+    return {
+        "ipHash": ip_hash,
+        "ipMasked": mask_ip(ip),
+        "blockedUntil": blocked_until,
+        "reason": reason,
+    }
+
+
+def get_alerts_status() -> dict:
+    from app.services import monitor_sata_service
+
+    sata = monitor_sata_service.alerts_config_status()
+    since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    sent_24h = 0
+    try:
+        sent_24h = int(
+            get_db().execute(
+                "SELECT COUNT(*) AS c FROM attack_shield_alert_log WHERE created_at >= ?",
+                (since_24h,),
+            ).fetchone()["c"]
+        )
+    except Exception:
+        pass
+    return {
+        "enabled": settings.attack_shield_alerts_enabled,
+        "minScore": settings.attack_shield_alert_min_score,
+        "whatsappPhone": settings.attack_shield_alert_whatsapp_phone or None,
+        "sent24h": sent_24h,
+        "channels": sata,
+        "updatedAt": _now(),
+    }
+
+
+def test_alert() -> dict:
+    from app.services import monitor_sata_service
+
+    message = (
+        "Test Bouclier anti-attaque Tech Manager\n"
+        "Canaux opérationnels — alerte simulée."
+    )
+    email_out = monitor_sata_service.dispatch_alert(
+        {"channel": "email", "message": message, "severity": "info"}
+    )
+    whatsapp_out = {"ok": False, "note": "Numéro WhatsApp non configuré"}
+    phone = settings.attack_shield_alert_whatsapp_phone
+    if phone:
+        whatsapp_out = monitor_sata_service.dispatch_alert(
+            {
+                "channel": "whatsapp",
+                "message": message,
+                "severity": "info",
+                "whatsappPhone": phone,
+            }
+        )
+    return {"ok": True, "email": email_out, "whatsapp": whatsapp_out}
 
 
 def list_events(limit: int = 50) -> list[dict]:

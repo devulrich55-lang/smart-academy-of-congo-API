@@ -158,6 +158,15 @@ class Settings:
     attack_shield_block_minutes: int = int(
         os.getenv("ATTACK_SHIELD_BLOCK_MINUTES", "60")
     )
+    attack_shield_alerts_enabled: bool = (
+        os.getenv("ATTACK_SHIELD_ALERTS_ENABLED", "true").lower() != "false"
+    )
+    attack_shield_alert_min_score: int = int(
+        os.getenv("ATTACK_SHIELD_ALERT_MIN_SCORE", "70")
+    )
+    attack_shield_alert_whatsapp_phone: str = os.getenv(
+        "ATTACK_SHIELD_ALERT_WHATSAPP", "+243851848859"
+    ).strip()
 
     @property
     def use_mysql(self) -> bool:

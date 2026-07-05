@@ -178,3 +178,54 @@ def tech_manager_shield_unblock(
         return {"ok": True, "ipHash": ip_hash}
     except ValueError as e:
         _map_error(e)
+
+
+@router.get("/shield/pulse")
+def tech_manager_shield_pulse(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+    since: str | None = Query(None),
+):
+    del user
+    return attack_shield_service.get_pulse(since)
+
+
+@router.get("/shield/trends")
+def tech_manager_shield_trends(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+    hours: int = Query(24, ge=1, le=72),
+):
+    del user
+    return attack_shield_service.get_trends(hours)
+
+
+@router.get("/shield/alerts/status")
+def tech_manager_shield_alerts_status(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    del user
+    return attack_shield_service.get_alerts_status()
+
+
+@router.post("/shield/alerts/test")
+def tech_manager_shield_alerts_test(
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    del user
+    return attack_shield_service.test_alert()
+
+
+@router.post("/shield/block")
+def tech_manager_shield_block(
+    body: dict,
+    user: dict = Depends(require_roles("techmanager", "superadmin")),
+):
+    del user
+    try:
+        result = attack_shield_service.manual_block_ip(
+            (body or {}).get("ip") or "",
+            reason=str((body or {}).get("reason") or "manual_block"),
+            minutes=(body or {}).get("minutes"),
+        )
+        return {"ok": True, **result}
+    except ValueError as e:
+        _map_error(e)

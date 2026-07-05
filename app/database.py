@@ -1441,6 +1441,20 @@ def _migrate_attack_shield_tables(conn, backend: str) -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS attack_shield_alert_log (
+                  id VARCHAR(80) PRIMARY KEY,
+                  event_id VARCHAR(80) NULL,
+                  action VARCHAR(20) NOT NULL,
+                  score INT NOT NULL,
+                  ip_masked VARCHAR(45) NULL,
+                  path TEXT NULL,
+                  channels_json TEXT NULL,
+                  created_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
             conn.commit()
         except pymysql.err.OperationalError:
             pass
@@ -1449,6 +1463,7 @@ def _migrate_attack_shield_tables(conn, backend: str) -> None:
             "CREATE INDEX idx_attack_events_ip ON attack_events(ip_hash, created_at)",
             "CREATE INDEX idx_blocked_ips_until ON blocked_ips(blocked_until)",
             "CREATE INDEX idx_honeypot_created ON honeypot_hits(created_at)",
+            "CREATE INDEX idx_shield_alert_created ON attack_shield_alert_log(created_at)",
         ):
             try:
                 cur.execute(idx_sql)
@@ -1493,10 +1508,21 @@ def _migrate_attack_shield_tables(conn, backend: str) -> None:
               payload_snippet TEXT,
               created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS attack_shield_alert_log (
+              id TEXT PRIMARY KEY,
+              event_id TEXT,
+              action TEXT NOT NULL,
+              score INTEGER NOT NULL,
+              ip_masked TEXT,
+              path TEXT,
+              channels_json TEXT,
+              created_at TEXT NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_attack_events_created ON attack_events(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_attack_events_ip ON attack_events(ip_hash, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_blocked_ips_until ON blocked_ips(blocked_until);
             CREATE INDEX IF NOT EXISTS idx_honeypot_created ON honeypot_hits(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_shield_alert_created ON attack_shield_alert_log(created_at DESC);
             """
         )
         conn.commit()
