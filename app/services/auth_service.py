@@ -28,6 +28,17 @@ INSTITUTIONAL_PORTAL_ROLES = frozenset(
 )
 
 
+def _portal_role_ok(user_role: str, expected_role: str | None) -> bool:
+    if not expected_role:
+        return True
+    if user_role == expected_role:
+        return True
+    # Super Admin peut accéder aux portails staff (Tech Manager, Dev Center, etc.)
+    if user_role == "superadmin" and expected_role in INSTITUTIONAL_PORTAL_ROLES:
+        return True
+    return False
+
+
 def _store_refresh_token(user_id: str, refresh_raw: str) -> str:
     expires_at = (
         datetime.now(timezone.utc) + timedelta(days=REFRESH_DAYS)
@@ -71,7 +82,7 @@ def login(
         time.sleep(0.3 + random.random() * 0.2)
         raise ValueError("INVALID_CREDENTIALS")
 
-    if expected_role and user["role"] != expected_role:
+    if expected_role and not _portal_role_ok(user["role"], expected_role):
         raise ValueError("ROLE_MISMATCH")
 
     if options.get("adminPortal"):

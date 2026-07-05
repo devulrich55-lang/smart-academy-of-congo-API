@@ -90,6 +90,11 @@ class Settings:
     smtp_use_ssl: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
     email_from: str = os.getenv("EMAIL_FROM", "").strip()
     cross_origin_auth: bool = os.getenv("CROSS_ORIGIN_AUTH", "false").lower() == "true"
+
+    @property
+    def expose_auth_tokens(self) -> bool:
+        """JWT dans le JSON login/refresh — obligatoire sur Render (front ≠ API)."""
+        return self.cross_origin_auth or os.getenv("RENDER", "").lower() == "true"
     api_page_default: int = int(os.getenv("API_PAGE_DEFAULT", "50"))
     api_page_max: int = int(os.getenv("API_PAGE_MAX", "200"))
     pons_api_secret: str = os.getenv("PONS_API_SECRET", "").strip()

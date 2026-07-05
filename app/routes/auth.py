@@ -114,7 +114,7 @@ def login_route(request: Request, body: dict, response: Response):
             )
         _set_auth_cookies(response, result["accessToken"], result["refreshRaw"])
         payload = {"ok": True, "session": result["session"]}
-        if settings.cross_origin_auth:
+        if settings.expose_auth_tokens:
             payload["accessToken"] = result["accessToken"]
             payload["refreshToken"] = result["refreshRaw"]
         return payload
@@ -185,7 +185,7 @@ def register_route(request: Request, body: dict, response: Response):
         tokens = auth_service.issue_tokens(user)
         _set_auth_cookies(response, tokens["accessToken"], tokens["refreshRaw"])
         payload = {"ok": True, "session": tokens["session"]}
-        if settings.cross_origin_auth:
+        if settings.expose_auth_tokens:
             payload["accessToken"] = tokens["accessToken"]
             payload["refreshToken"] = tokens["refreshRaw"]
         return payload
@@ -277,7 +277,7 @@ def provision_route(request: Request, body: dict, response: Response):
         )
         _set_auth_cookies(response, tokens["accessToken"], tokens["refreshRaw"])
         payload = {"ok": True, "session": tokens["session"]}
-        if settings.cross_origin_auth:
+        if settings.expose_auth_tokens:
             payload["accessToken"] = tokens["accessToken"]
             payload["refreshToken"] = tokens["refreshRaw"]
         return payload
@@ -302,7 +302,7 @@ async def refresh_route(
         result = auth_service.refresh_session(refresh_raw)
         _set_auth_cookies(response, result["accessToken"], result["refreshRaw"])
         payload = {"ok": True, "session": result["session"]}
-        if settings.cross_origin_auth:
+        if settings.expose_auth_tokens:
             payload["accessToken"] = result["accessToken"]
             payload["refreshToken"] = result["refreshRaw"]
         return payload
