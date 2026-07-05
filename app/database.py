@@ -2186,6 +2186,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_live_sessions_table(conn, "mysql")
     _migrate_users_roles_mysql(conn)
     _migrate_attack_shield_tables(conn, "mysql")
+    _migrate_staff_mfa_challenges(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -2262,6 +2263,37 @@ def _migrate_users_admin_roles_sqlite(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE users_new RENAME TO users")
 
 
+def _migrate_staff_mfa_challenges(conn, backend: str) -> None:
+    sql = """
+    CREATE TABLE IF NOT EXISTS staff_mfa_challenges (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL
+    )
+    """
+    idx = "CREATE INDEX IF NOT EXISTS idx_staff_mfa_user ON staff_mfa_challenges(user_id, expires_at DESC)"
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            cur.execute(idx)
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            cur.close()
+        return
+    try:
+        conn.execute(sql)
+        conn.execute(idx)
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_sqlite() -> SACDatabase:
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
@@ -2330,6 +2362,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_users_developpeur_role_sqlite(conn)
     _migrate_users_techmanager_role_sqlite(conn)
     _migrate_attack_shield_tables(conn, "sqlite")
+    _migrate_staff_mfa_challenges(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
 

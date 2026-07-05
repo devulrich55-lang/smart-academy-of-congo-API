@@ -45,6 +45,7 @@ ERROR_MAP = {
         503,
         "Impossible d'envoyer l'e-mail pour le moment. Réessayez dans quelques minutes ou contactez le support.",
     ),
+    "INVALID_MFA": (401, "Code de vérification invalide ou expiré"),
 }
 
 
@@ -102,6 +103,13 @@ def login_route(request: Request, body: dict, response: Response):
                 "adminPortal": bool(body.get("adminPortal")),
             },
         )
+        if result.get("mfaRequired"):
+            return {
+                "ok": True,
+                "mfaRequired": True,
+                "mfaChallenge": result["mfaChallenge"],
+                "emailHint": result.get("emailHint"),
+            }
         user = find_user_by_id(result["session"]["userId"])
         if user:
             request.state.user = user
@@ -137,6 +145,39 @@ def login_route(request: Request, body: dict, response: Response):
                 "identifier": str(identifier).strip().lower()[:255],
             },
         )
+        _map_error(e)
+
+
+@router.post("/staff-mfa/verify")
+@limiter.limit("12/minute")
+def staff_mfa_verify_route(request: Request, body: dict, response: Response):
+    from app.services import staff_mfa_service
+
+    challenge = (body or {}).get("mfaChallenge") or (body or {}).get("challenge")
+    code = (body or {}).get("code")
+    if not challenge or not code:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail={"error": "MISSING_FIELDS"})
+    try:
+        result = staff_mfa_service.verify_staff_mfa(str(challenge), str(code))
+        user = find_user_by_id(result["session"]["userId"])
+        if user:
+            request.state.user = user
+            audit_service.log_audit(
+                request,
+                "login",
+                "session",
+                universite=user.get("universite"),
+                meta={"role": user.get("role"), "portal": True, "mfa": True},
+            )
+        _set_auth_cookies(response, result["accessToken"], result["refreshRaw"])
+        payload = {"ok": True, "session": result["session"]}
+        if settings.expose_auth_tokens:
+            payload["accessToken"] = result["accessToken"]
+            payload["refreshToken"] = result["refreshRaw"]
+        return payload
+    except ValueError as e:
         _map_error(e)
 
 

@@ -122,6 +122,12 @@ def login(
 
     clear_failed_logins(user["id"])
     user = migrate_user_campus_if_needed(user)
+
+    from app.services import staff_mfa_service
+
+    if staff_mfa_service.should_require_staff_mfa(user, options):
+        return staff_mfa_service.start_staff_mfa(user)
+
     return issue_tokens(user)
 
 

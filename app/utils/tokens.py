@@ -41,3 +41,26 @@ def generate_reset_token_raw() -> str:
 def generate_reset_code() -> str:
     """Code numérique à 6 chiffres pour réinitialisation par e-mail."""
     return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def sign_mfa_challenge(payload: dict) -> str:
+    data = {
+        **payload,
+        "typ": "staff_mfa",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
+    }
+    return jwt.encode(data, settings.jwt_refresh_secret, algorithm="HS256")
+
+
+def verify_mfa_challenge(token: str) -> dict:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_refresh_secret,
+            algorithms=["HS256"],
+        )
+    except JWTError as exc:
+        raise ValueError("INVALID_MFA") from exc
+    if payload.get("typ") != "staff_mfa":
+        raise ValueError("INVALID_MFA")
+    return payload

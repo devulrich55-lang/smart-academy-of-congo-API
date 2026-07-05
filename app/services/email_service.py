@@ -182,3 +182,38 @@ def send_platform_notification_email(
     except Exception as exc:
         logger.error("Échec notification e-mail à %s : %s", to_email, exc)
         return False
+
+
+def send_staff_login_code_email(
+    to_email: str,
+    display_name: str,
+    code: str,
+    valid_minutes: int = 10,
+) -> bool:
+    brand = _brand()
+    subject = f"Code de connexion {_brand_short()} — portail staff"
+    greeting = display_name or "Utilisateur"
+    text_body = (
+        f"Bonjour {greeting},\n\n"
+        f"Votre code de connexion {brand} : {code}\n"
+        f"(valide {valid_minutes} min — ne le partagez avec personne)\n\n"
+        f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce message."
+    )
+    html_body = (
+        f"<p>Bonjour {greeting},</p>"
+        f"<p>Votre code de connexion <strong>{brand}</strong> :</p>"
+        f"<p style='font-size:24px;letter-spacing:4px'><strong>{code}</strong></p>"
+        f"<p>Valide {valid_minutes} minutes. Ne le partagez avec personne.</p>"
+    )
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.email_from
+    msg["To"] = to_email
+    msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    try:
+        _send_via_smtp(to_email, msg)
+        return True
+    except Exception as exc:
+        logger.error("Échec envoi code MFA staff à %s : %s", to_email, exc)
+        return False

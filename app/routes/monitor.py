@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.deps import require_roles
-from app.services import monitor_service, monitor_sata_service, monitor_ai_ops_service
+from app.services import attack_shield_service, monitor_service, monitor_sata_service, monitor_ai_ops_service
 
 router = APIRouter(prefix="/admin/monitor", tags=["monitor"])
 
@@ -186,3 +186,27 @@ def monitor_ai_ops_update_ticket(
         return {"ok": True, "ticket": ticket}
     except ValueError as e:
         _map_error(e)
+
+
+@router.get("/shield/overview")
+def monitor_shield_overview(user: dict = Depends(require_roles("superadmin"))):
+    del user
+    return attack_shield_service.get_overview()
+
+
+@router.get("/shield/trends")
+def monitor_shield_trends(
+    user: dict = Depends(require_roles("superadmin")),
+    hours: int = Query(24, ge=1, le=72),
+):
+    del user
+    return attack_shield_service.get_trends(hours)
+
+
+@router.get("/shield/pulse")
+def monitor_shield_pulse(
+    user: dict = Depends(require_roles("superadmin")),
+    since: str | None = Query(None),
+):
+    del user
+    return attack_shield_service.get_pulse(since)
