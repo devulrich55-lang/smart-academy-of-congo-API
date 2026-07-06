@@ -343,9 +343,19 @@ def seed_institutional_admins_if_missing() -> None:
             "prenom": "Ministere",
             "nom": "Education",
             "telephone": "+243 82 200 0002",
+            "countryCode": "CD",
         },
     ]
     created = []
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE users SET country_code = 'CD' WHERE role = 'ministere' "
+            "AND (country_code IS NULL OR country_code = '')"
+        )
+        db.commit()
+    except Exception:
+        pass
     for item in seeds:
         if find_user_by_email(item["email"]):
             continue

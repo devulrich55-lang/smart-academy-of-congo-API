@@ -1572,9 +1572,9 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         raise ValueError("INVALID_PROFILE")
     if not validate_password(profile.get("password")):
         raise ValueError("INVALID_PASSWORD")
-    email = validate_email_strict(profile.get("email"))
+    email = validate_email_strict(profile.get("email")) or clean_email(profile.get("email"))
     if not email:
-        raise ValueError("INVALID_PROFILE")
+        raise ValueError("INVALID_EMAIL")
 
     if role == "superadmin" and count_superadmin_accounts() >= MAX_SUPERADMIN_ACCOUNTS:
         raise ValueError("SUPERADMIN_LIMIT")
@@ -1591,7 +1591,16 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         fonction = clean_text(profile.get("fonction"), 50)
         if fonction:
             payload["fonction"] = fonction
-        payload["countryCode"] = _require_country_code(profile)
+        country = _require_country_code(profile)
+        payload["countryCode"] = country
+        existing = get_db().execute(
+            """SELECT email FROM users WHERE role = 'ministere'
+               AND (country_code = ? OR (country_code IS NULL AND ? = 'CD'))
+               LIMIT 1""",
+            (country, country),
+        ).fetchone()
+        if existing:
+            raise ValueError("MINISTRY_COUNTRY_EXISTS")
     if role == "developpeur":
         payload["fonction"] = clean_text(profile.get("fonction"), 80) or "Développeur EvoSU"
     if role == "techmanager":

@@ -100,6 +100,7 @@ def login_route(request: Request, body: dict, response: Response):
             {
                 "universite": body.get("universite"),
                 "codeUni": body.get("codeUni"),
+                "countryCode": body.get("countryCode") or body.get("country_code"),
                 "adminPortal": bool(body.get("adminPortal")),
             },
         )
