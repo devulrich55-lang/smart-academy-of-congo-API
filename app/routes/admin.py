@@ -33,7 +33,11 @@ ERROR_MAP = {
     "INVALID_EMAIL": (400, "E-mail institutionnel invalide — évitez les adresses jetables ou génériques bloquées."),
     "MINISTRY_COUNTRY_EXISTS": (
         409,
-        "Un compte Ministère existe déjà pour ce pays. Modifiez-le ou supprimez l'ancien compte.",
+        "Un compte Ministère existe déjà pour ce pays mais est introuvable — contactez le support.",
+    ),
+    "UNIVERSITY_CAMPUS_EXISTS": (
+        409,
+        "Un administrateur existe déjà pour cet établissement. Supprimez-le dans la liste avant d'en créer un nouveau.",
     ),
     "INVALID_PASSWORD": (400, "Mot de passe invalide (8+ caractères, lettre + chiffre)"),
     "CANNOT_DELETE_SELF": (400, "Vous ne pouvez pas supprimer votre propre compte"),

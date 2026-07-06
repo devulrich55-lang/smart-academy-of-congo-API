@@ -336,16 +336,8 @@ def seed_institutional_admins_if_missing() -> None:
 
     _ensure_superadmin_seed()
 
-    seeds = [
-        {
-            "email": "admin@ministere.cd",
-            "role": "ministere",
-            "prenom": "Ministere",
-            "nom": "Education",
-            "telephone": "+243 82 200 0002",
-            "countryCode": "CD",
-        },
-    ]
+    # Le Super Admin crée les comptes Ministère avec des e-mails réels — pas de seed automatique.
+    seeds: list[dict] = []
     created = []
     db = get_db()
     try:

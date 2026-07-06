@@ -203,12 +203,11 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
             raise ValueError("INVALID_PROFILE")
         return phone
 
-    if not phone:
-        raise ValueError("INVALID_PHONE")
-    if find_user_by_phone(phone):
-        raise ValueError("PHONE_EXISTS")
-
     if role == "universite":
+        if not phone:
+            phone = None
+        elif find_user_by_phone(phone):
+            raise ValueError("PHONE_EXISTS")
         if not validate_person_name_text(profile.get("nomUniversite"), 3):
             raise ValueError("INVALID_PROFILE")
         if not validate_person_name_text(profile.get("responsable"), 3):
@@ -222,6 +221,11 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
             if k == uni_key:
                 raise ValueError("IDENTITY_CONFLICT")
         return phone
+
+    if not phone:
+        raise ValueError("INVALID_PHONE")
+    if find_user_by_phone(phone):
+        raise ValueError("PHONE_EXISTS")
 
     if role == "section":
         if not validate_person_name_text(profile.get("prenom")) and not validate_person_name_text(
@@ -1354,6 +1358,46 @@ def update_password(user_id: str, new_password: str) -> None:
     get_db().commit()
 
 
+def _institutional_email(raw: object) -> str:
+    """E-mail institutionnel — format valide ; pas de blocage admin@ / test@ (comptes créés par Super Admin)."""
+    return clean_email(str(raw or "")) or ""
+
+
+def _replace_ministry_admin(existing_user: dict, profile: dict, email: str, country: str) -> dict:
+    new_email = _institutional_email(profile.get("email"))
+    if not new_email:
+        raise ValueError("INVALID_EMAIL")
+    if new_email.lower() != str(existing_user.get("email") or "").lower():
+        other = find_user_by_email(new_email)
+        if other and other.get("id") != existing_user.get("id"):
+            raise ValueError("EMAIL_EXISTS")
+    fonction = clean_text(profile.get("fonction"), 50)
+    now = datetime.now(timezone.utc).isoformat()
+    get_db().execute(
+        """UPDATE users SET email = ?, prenom = ?, nom = ?, fonction = ?,
+           country_code = ?, telephone = ?, updated_at = ? WHERE id = ?""",
+        (
+            new_email,
+            clean_text(profile.get("prenom"), 100) or existing_user.get("prenom"),
+            clean_text(profile.get("nom"), 150) or existing_user.get("nom"),
+            fonction or existing_user.get("fonction"),
+            country,
+            clean_phone(profile.get("telephone")),
+            now,
+            existing_user["id"],
+        ),
+    )
+    get_db().commit()
+    if profile.get("password") and validate_password(profile.get("password")):
+        update_password(existing_user["id"], profile["password"])
+    updated = find_user_by_id(existing_user["id"])
+    if not updated:
+        raise ValueError("CREATE_FAILED")
+    row = _institutional_row(updated)
+    row["updated"] = True
+    return row
+
+
 def revoke_all_refresh_tokens(user_id: str) -> None:
     get_db().execute("DELETE FROM refresh_tokens WHERE user_id = ?", (user_id,))
     get_db().commit()
@@ -1572,7 +1616,7 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         raise ValueError("INVALID_PROFILE")
     if not validate_password(profile.get("password")):
         raise ValueError("INVALID_PASSWORD")
-    email = validate_email_strict(profile.get("email")) or clean_email(profile.get("email"))
+    email = _institutional_email(profile.get("email"))
     if not email:
         raise ValueError("INVALID_EMAIL")
 
@@ -1594,18 +1638,25 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
         country = _require_country_code(profile)
         payload["countryCode"] = country
         existing = get_db().execute(
-            """SELECT email FROM users WHERE role = 'ministere'
+            """SELECT id, email FROM users WHERE role = 'ministere'
                AND (country_code = ? OR (country_code IS NULL AND ? = 'CD'))
                LIMIT 1""",
             (country, country),
         ).fetchone()
         if existing:
+            existing_user = find_user_by_id(existing["id"]) or find_user_by_email(existing["email"])
+            if existing_user:
+                row = _replace_ministry_admin(existing_user, profile, email, country)
+                print(f"[SAC] Compte Ministère mis à jour: {row.get('email')} ({country})")
+                return row
             raise ValueError("MINISTRY_COUNTRY_EXISTS")
     if role == "developpeur":
         payload["fonction"] = clean_text(profile.get("fonction"), 80) or "Développeur EvoSU"
     if role == "techmanager":
         payload["fonction"] = clean_text(profile.get("fonction"), 80) or "Responsable technique EvoSU"
     if role == "universite":
+        from app.utils.campus_catalog import same_campus
+
         campus = normalize_profile_campus(
             {
                 "role": "universite",
@@ -1627,11 +1678,27 @@ def create_institutional_admin(actor: dict, profile: dict) -> dict:
             }
         )
         payload["countryCode"] = _require_country_code(profile)
+        campus_id = payload.get("universite")
+        if campus_id:
+            for row in get_db().execute(
+                "SELECT email, universite FROM users WHERE role = 'universite'"
+            ).fetchall():
+                if same_campus(campus_id, row["universite"]):
+                    raise ValueError("UNIVERSITY_CAMPUS_EXISTS")
     created = create_user(payload)
     if not created:
         raise ValueError("CREATE_FAILED")
     if created and role == "universite":
         faculty_sections = profile.get("facultySections") or []
+        if not faculty_sections:
+            resp = clean_text(profile.get("responsable"), 150) or "Direction"
+            faculty_sections = [
+                {
+                    "name": "Administration générale",
+                    "filiere": "Général",
+                    "responsableNom": resp,
+                }
+            ]
         if faculty_sections:
             from app.services.reclamation_service import seed_faculty_sections_for_university
 
