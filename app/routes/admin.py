@@ -57,6 +57,10 @@ ERROR_MAP = {
         "Rôle non autorisé en base — redéployez l'API (API-1) pour activer Développeur / Tech Manager.",
     ),
     "CREATE_FAILED": (500, "Création du compte impossible — réessayez ou consultez les logs API."),
+    "PAYLOAD_TOO_LARGE": (
+        413,
+        "Données trop volumineuses — réduisez le logo ou créez le compte sans image.",
+    ),
 }
 
 
@@ -143,9 +147,17 @@ def create_institutional_route(
             "user",
             meta={"email": created.get("email", "")[:80], "role": created.get("role")},
         )
-        return {"ok": True, "admin": created}
+        return {"ok": True, "admin": created, "email": created.get("email")}
     except ValueError as e:
         _map_error(e)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        msg = str(exc).upper()
+        print(f"[SAC] create_institutional_admin error: {exc}")
+        if "CHECK" in msg and "ROLE" in msg:
+            _map_error(ValueError("DB_ROLE_CONSTRAINT"))
+        _map_error(ValueError("CREATE_FAILED"))
 
 
 @router.post("/institutional/faculty-sections", status_code=201)

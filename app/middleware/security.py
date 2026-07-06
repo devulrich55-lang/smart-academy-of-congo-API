@@ -51,16 +51,23 @@ class PayloadGuardMiddleware(BaseHTTPMiddleware):
     """Limite la taille et détecte les payloads malveillants."""
 
     MAX_BODY = 512 * 1024  # 512 Ko (hors multipart géré ailleurs)
+    MAX_INSTITUTIONAL_BODY = 4 * 1024 * 1024  # 4 Mo — logo université en base64
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.method in ("POST", "PUT", "PATCH"):
             ct = request.headers.get("content-type", "")
             if "multipart/form-data" not in ct:
                 body = await request.body()
-                if len(body) > self.MAX_BODY:
+                max_len = self.MAX_BODY
+                if request.url.path.rstrip("/").endswith("/admin/institutional"):
+                    max_len = self.MAX_INSTITUTIONAL_BODY
+                if len(body) > max_len:
                     return JSONResponse(
                         status_code=413,
-                        content={"error": "PAYLOAD_TOO_LARGE"},
+                        content={
+                            "error": "PAYLOAD_TOO_LARGE",
+                            "message": "Corps de requête trop volumineux",
+                        },
                     )
                 if body and _SUSPICIOUS_PATTERNS.search(body.decode("utf-8", errors="ignore")):
                     try:
