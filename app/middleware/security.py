@@ -59,7 +59,7 @@ class PayloadGuardMiddleware(BaseHTTPMiddleware):
             if "multipart/form-data" not in ct:
                 body = await request.body()
                 max_len = self.MAX_BODY
-                if request.url.path.rstrip("/").endswith("/admin/institutional"):
+                if "/admin/institutional" in request.url.path:
                     max_len = self.MAX_INSTITUTIONAL_BODY
                 if len(body) > max_len:
                     return JSONResponse(

@@ -133,7 +133,7 @@ def institutional_list_route(
 
 
 @router.post("/institutional", status_code=201)
-@limiter.limit("20/hour")
+@limiter.limit("120/hour")
 def create_institutional_route(
     body: dict,
     request: Request,

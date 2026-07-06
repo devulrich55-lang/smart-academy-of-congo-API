@@ -401,7 +401,9 @@ def create_user(profile: dict) -> dict:
             raise ValueError("EMAIL_EXISTS") from exc
         if "CHECK CONSTRAINT" in msg or "CHK_USERS_ROLE" in msg:
             raise ValueError("DB_ROLE_CONSTRAINT") from exc
-        raise
+        if "NO SUCH COLUMN" in msg or "UNKNOWN COLUMN" in msg:
+            raise ValueError("CREATE_FAILED") from exc
+        raise ValueError("CREATE_FAILED") from exc
     created = find_user_by_id(user_id)
     if created and role == "etudiant":
         from app.services.reclamation_service import find_section_for_student

@@ -164,6 +164,10 @@ def score_request(request, *, body_preview: str = "") -> tuple[int, list[str], s
         score += 18
         reasons.append("admin_without_auth")
 
+    # Création compte institutionnel — ne pas pénaliser les requêtes authentifiées
+    if path.rstrip("/").endswith("/admin/institutional") and auth_header.lower().startswith("bearer "):
+        return 0, [], ACTION_ALLOW
+
     if method in ("DELETE", "TRACE", "CONNECT"):
         score += 15
         reasons.append(f"method_{method.lower()}")
