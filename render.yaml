@@ -1,70 +1,29 @@
-# Render Blueprint — Smart Academy API (Python + MySQL)
-# https://render.com/docs/blueprint-spec
-#
-# MySQL : service externe (PlanetScale, Aiven, AWS RDS, etc.)
-# Render ne fournit pas MySQL natif — utilisez DATABASE_URL.
-
+# Render — API Evo-smartUni (smart-academy-of-congo-api-1)
+# IMPORTANT : sans disque /data les comptes créés sont perdus à chaque redémarrage.
 services:
   - type: web
-    name: evosu-api-python
+    name: smart-academy-of-congo-api-1
     runtime: python
-    rootDir: backend-python
-    plan: standard
+    plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 30
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
-    autoDeploy: true
     disk:
-      name: evosu-data
+      name: sac-data
       mountPath: /data
       sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
-      - key: COOKIE_SECURE
-        value: true
-      # Mode test (défaut) : SQLite sur disque /data — voir MODE-TEST-RENDER.md
-      # Pour MySQL en prod : DATABASE_BACKEND=mysql + DATABASE_URL
-      - key: DATABASE_BACKEND
-        value: sqlite
+      - key: RENDER
+        value: "true"
+      - key: CROSS_ORIGIN_AUTH
+        value: "true"
       - key: DATABASE_PATH
-        value: /data/EvoSU.db
+        value: /data/sac.db
       - key: UPLOAD_DIR
         value: /data/uploads
       - key: BACKUP_DIR
         value: /data/backups
-      - key: BACKUP_INTERVAL_HOURS
-        value: "6"
-      - key: BACKUP_RETENTION_HOURS
-        value: "24"
-      - key: BACKUP_ENABLED
-        value: "true"
-      - key: JWT_ACCESS_SECRET
-        generateValue: true
-      - key: JWT_REFRESH_SECRET
-        generateValue: true
-      - key: EVOSU_PLATFORM_SECRET
-        generateValue: true
       - key: ALLOWED_ORIGINS
-        value: https://REPLACE-WITH-YOUR-FRONTEND-URL.com
-      - key: FRONTEND_URL
-        value: https://REPLACE-WITH-YOUR-FRONTEND-URL.com
-      - key: CROSS_ORIGIN_AUTH
-        value: "true"
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        value: "465"
-      - key: SMTP_USE_SSL
-        value: "true"
-      - key: SMTP_USE_TLS
-        value: "false"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: GMAIL_USER
-        sync: false
-      - key: GMAIL_APP_PASSWORD
-        sync: false
-      # Ne pas fixer EMAIL_FROM ici : doit être = GMAIL_USER (voir app/config.py)
+        value: https://smart-academy-of-congoat.onrender.com,https://evosmartuni.com,https://www.evosmartuni.com
