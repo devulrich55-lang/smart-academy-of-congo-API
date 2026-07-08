@@ -201,25 +201,6 @@ def upsert_grade(body: dict, request: Request, user: dict = Depends(get_current_
         _handle_platform_error(e)
 
 
-@router.get("/library")
-def list_library(user: dict = Depends(get_current_user)):
-    return {
-        "items": platform_service.list_library(user["universite"], user["role"])
-    }
-
-
-@router.post("/library")
-def create_library(body: dict, request: Request, user: dict = Depends(get_current_user)):
-    try:
-        item = platform_service.create_library_item(user, body)
-        audit_service.log_audit(
-            request, "create_library", "library", resource_id=item.get("id"), universite=item.get("universite")
-        )
-        return {"item": item}
-    except ValueError as e:
-        _handle_platform_error(e)
-
-
 @router.get("/careers")
 def list_careers(scope: str | None = None, user: dict = Depends(get_current_user)):
     return {
