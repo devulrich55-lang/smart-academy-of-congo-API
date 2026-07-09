@@ -192,7 +192,7 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
     phone = clean_phone(profile.get("telephone"))
     role = clean_role(profile.get("role"))
 
-    if role in ("ministere", "superadmin", "developpeur", "techmanager"):
+    if role in ("ministere", "superadmin", "developpeur", "techmanager", "auteur"):
         if not phone:
             phone = None
         elif find_user_by_phone(phone):
@@ -250,7 +250,7 @@ def _assert_unique_identity(profile: dict, email: str) -> str:
     for row in get_db().execute(
         "SELECT email, role, prenom, nom FROM users"
     ).fetchall():
-        if row["role"] in ("universite", "ministere", "superadmin", "developpeur", "techmanager"):
+        if row["role"] in ("universite", "ministere", "superadmin", "developpeur", "techmanager", "auteur"):
             continue
         if norm_person_key(row["prenom"], row["nom"]) == key and row["role"] != role:
             raise ValueError("MULTI_ROLE")
@@ -501,7 +501,7 @@ def user_to_session(user: dict | None) -> dict | None:
             section_approval = "pending"
         elif user.get("createdAt"):
             section_approval = "pending"
-    return {
+    session = {
         "role": user["role"],
         "email": user["email"],
         "identifiant": user["email"],
@@ -538,6 +538,15 @@ def user_to_session(user: dict | None) -> dict | None:
         "paymentStatus": payment.get("status") if payment else None,
         "createdAt": user.get("createdAt"),
     }
+    if user.get("role") == "auteur":
+        from app.services import edb_service
+
+        author = edb_service.get_author_by_email(user.get("email") or "")
+        if author:
+            session["authorStatus"] = author.get("status")
+            session["mobileMoney"] = author.get("mobileMoney")
+            session["penName"] = author.get("penName")
+    return session
 
 
 def _is_rector_actor(actor: dict) -> bool:

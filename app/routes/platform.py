@@ -4,7 +4,7 @@ from pathlib import Path
 import uuid
 
 from app.config import settings
-from app.deps import get_current_user, require_roles
+from app.deps import get_current_user, get_optional_user, require_roles
 from app.rate_limit import limiter
 from app.services import ai_correction_service, audit_service, career_service, course_service, dictionary_service, diploma_service, home_news_service, library_service, live_service, meeting_service, orientation_service, platform_service, social_service
 from app.services import reclamation_service
@@ -800,8 +800,9 @@ def delete_home_news_route(
 
 
 @router.get("/library")
-def list_library_public():
-    return {"items": library_service.list_public_books()}
+def list_library_public(user: dict | None = Depends(get_optional_user)):
+    email = user.get("email") if user else None
+    return {"items": library_service.list_public_books(email)}
 
 
 @router.get("/dictionary/languages")
@@ -835,7 +836,9 @@ def translate_dictionary_route(
 
 
 @router.get("/library/manage")
-def list_library_manage(user: dict = Depends(require_roles("ministere", "superadmin"))):
+def list_library_manage(
+    user: dict = Depends(require_roles("ministere", "superadmin", "auteur")),
+):
     try:
         return {"items": library_service.list_manage_books(user)}
     except ValueError as e:
@@ -843,7 +846,10 @@ def list_library_manage(user: dict = Depends(require_roles("ministere", "superad
 
 
 @router.post("/library", status_code=201)
-def create_library_route(body: dict, user: dict = Depends(require_roles("ministere", "superadmin"))):
+def create_library_route(
+    body: dict,
+    user: dict = Depends(require_roles("ministere", "superadmin", "auteur")),
+):
     try:
         item = library_service.create_book(user, body)
         return {"ok": True, "item": item}
@@ -853,7 +859,9 @@ def create_library_route(body: dict, user: dict = Depends(require_roles("ministe
 
 @router.patch("/library/{item_id}")
 def update_library_route(
-    item_id: str, body: dict, user: dict = Depends(require_roles("ministere", "superadmin"))
+    item_id: str,
+    body: dict,
+    user: dict = Depends(require_roles("ministere", "superadmin", "auteur")),
 ):
     try:
         item = library_service.update_book(user, item_id, body)
@@ -863,7 +871,10 @@ def update_library_route(
 
 
 @router.delete("/library/{item_id}")
-def delete_library_route(item_id: str, user: dict = Depends(require_roles("ministere", "superadmin"))):
+def delete_library_route(
+    item_id: str,
+    user: dict = Depends(require_roles("ministere", "superadmin", "auteur")),
+):
     try:
         return library_service.delete_book(user, item_id)
     except ValueError as e:
@@ -873,7 +884,7 @@ def delete_library_route(item_id: str, user: dict = Depends(require_roles("minis
 @router.post("/library/upload")
 async def upload_library_file_route(
     files: list[UploadFile] = File(...),
-    user: dict = Depends(require_roles("ministere", "superadmin")),
+    user: dict = Depends(require_roles("ministere", "superadmin", "auteur")),
 ):
     del user
     saved = await _save_home_news_uploads(files)

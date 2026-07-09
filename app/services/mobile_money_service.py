@@ -12,7 +12,7 @@ from app.database import get_db
 from app.utils.sanitize import clean_text
 
 PROVIDERS = frozenset({"orange", "mpesa"})
-PURPOSES = frozenset({"inscription", "academic_fee"})
+PURPOSES = frozenset({"inscription", "academic_fee", "evodigitalbooks"})
 STATUSES = frozenset(
     {"pending", "awaiting_pin", "processing", "completed", "failed", "expired"}
 )
@@ -160,6 +160,10 @@ def initiate(
     if purpose == "academic_fee":
         if not actor or actor.get("role") != "etudiant":
             raise ValueError("FORBIDDEN")
+    elif purpose == "evodigitalbooks":
+        meta = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        if not clean_text(meta.get("bookId"), 80):
+            raise ValueError("INVALID_PURPOSE")
     elif purpose == "inscription" and actor and actor.get("role") not in (
         None,
         "etudiant",
@@ -337,6 +341,16 @@ def _mark_completed(tx_id: str, external_ref: str = "") -> None:
         (external_ref, now, now, tx_id),
     )
     get_db().commit()
+    row = get_db().execute(
+        "SELECT * FROM mobile_money_transactions WHERE id = ?", (tx_id,)
+    ).fetchone()
+    if row and row["purpose"] == "evodigitalbooks":
+        from app.services import edb_service
+
+        try:
+            edb_service.record_purchase_from_mobile_tx(_row_to_tx(row))
+        except Exception:
+            pass
 
 
 def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:

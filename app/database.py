@@ -667,6 +667,184 @@ def _migrate_digital_library_table(conn, backend: str) -> None:
         pass
 
 
+def _migrate_digital_library_edb_columns(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        for col_sql in (
+            "ALTER TABLE digital_library ADD COLUMN source VARCHAR(40) NULL DEFAULT ''",
+            "ALTER TABLE digital_library ADD COLUMN is_free TINYINT(1) NOT NULL DEFAULT 1",
+            "ALTER TABLE digital_library ADD COLUMN price DECIMAL(12,2) NOT NULL DEFAULT 0",
+            "ALTER TABLE digital_library ADD COLUMN currency VARCHAR(10) NULL DEFAULT 'USD'",
+            "ALTER TABLE digital_library ADD COLUMN author_email VARCHAR(255) NULL DEFAULT ''",
+            "ALTER TABLE digital_library ADD COLUMN author_mobile_money VARCHAR(30) NULL DEFAULT ''",
+        ):
+            try:
+                cur.execute(col_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] != 1060:
+                    raise
+        cur.close()
+        return
+
+    for col_sql in (
+        "ALTER TABLE digital_library ADD COLUMN source TEXT DEFAULT ''",
+        "ALTER TABLE digital_library ADD COLUMN is_free INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE digital_library ADD COLUMN price REAL NOT NULL DEFAULT 0",
+        "ALTER TABLE digital_library ADD COLUMN currency TEXT DEFAULT 'USD'",
+        "ALTER TABLE digital_library ADD COLUMN author_email TEXT DEFAULT ''",
+        "ALTER TABLE digital_library ADD COLUMN author_mobile_money TEXT DEFAULT ''",
+    ):
+        try:
+            conn.execute(col_sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+
+def _migrate_edb_tables(conn, backend: str) -> None:
+    if backend == "mysql":
+        cur = conn.cursor()
+        for ddl in (
+            """
+            CREATE TABLE IF NOT EXISTS edb_authors (
+              id VARCHAR(80) PRIMARY KEY,
+              email VARCHAR(255) NOT NULL UNIQUE,
+              pen_name VARCHAR(120) NOT NULL,
+              mobile_money VARCHAR(30) NOT NULL,
+              bio TEXT NULL,
+              password_hash VARCHAR(255) NOT NULL,
+              status VARCHAR(20) NOT NULL DEFAULT 'pending',
+              created_at VARCHAR(40) NOT NULL,
+              reviewed_at VARCHAR(40) NULL,
+              reviewed_by VARCHAR(255) NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS edb_purchases (
+              id VARCHAR(80) PRIMARY KEY,
+              book_id VARCHAR(80) NOT NULL,
+              buyer_email VARCHAR(255) NOT NULL,
+              amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+              currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+              author_share DECIMAL(12,2) NOT NULL DEFAULT 0,
+              platform_fee DECIMAL(12,2) NOT NULL DEFAULT 0,
+              author_email VARCHAR(255) NULL,
+              author_mobile_money VARCHAR(30) NULL,
+              device_id VARCHAR(120) NULL,
+              created_at VARCHAR(40) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS edb_devices (
+              buyer_email VARCHAR(255) NOT NULL,
+              device_id VARCHAR(120) NOT NULL,
+              registered_at VARCHAR(40) NOT NULL,
+              PRIMARY KEY (buyer_email, device_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+        ):
+            try:
+                cur.execute(ddl)
+                conn.commit()
+            except pymysql.err.OperationalError:
+                pass
+        for idx_sql in (
+            "CREATE INDEX idx_edb_authors_status ON edb_authors(status)",
+            "CREATE INDEX idx_edb_purchases_buyer ON edb_purchases(buyer_email)",
+            "CREATE INDEX idx_edb_purchases_book ON edb_purchases(book_id)",
+        ):
+            try:
+                cur.execute(idx_sql)
+                conn.commit()
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] not in (1061, 1060):
+                    raise
+        cur.close()
+        return
+
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS edb_authors (
+              id TEXT PRIMARY KEY,
+              email TEXT NOT NULL UNIQUE,
+              pen_name TEXT NOT NULL,
+              mobile_money TEXT NOT NULL,
+              bio TEXT DEFAULT '',
+              password_hash TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              created_at TEXT NOT NULL,
+              reviewed_at TEXT,
+              reviewed_by TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_edb_authors_status ON edb_authors(status);
+            CREATE TABLE IF NOT EXISTS edb_purchases (
+              id TEXT PRIMARY KEY,
+              book_id TEXT NOT NULL,
+              buyer_email TEXT NOT NULL,
+              amount REAL NOT NULL DEFAULT 0,
+              currency TEXT NOT NULL DEFAULT 'USD',
+              author_share REAL NOT NULL DEFAULT 0,
+              platform_fee REAL NOT NULL DEFAULT 0,
+              author_email TEXT,
+              author_mobile_money TEXT,
+              device_id TEXT,
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_edb_purchases_buyer ON edb_purchases(buyer_email);
+            CREATE INDEX IF NOT EXISTS idx_edb_purchases_book ON edb_purchases(book_id);
+            CREATE TABLE IF NOT EXISTS edb_devices (
+              buyer_email TEXT NOT NULL,
+              device_id TEXT NOT NULL,
+              registered_at TEXT NOT NULL,
+              PRIMARY KEY (buyer_email, device_id)
+            );
+            """
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_users_auteur_role_sqlite(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    ddl = row["sql"] if row else ""
+    if "'auteur'" in ddl:
+        return
+
+    cols = conn.execute("PRAGMA table_info(users)").fetchall()
+    if not cols:
+        return
+
+    parts: list[str] = []
+    for col in cols:
+        _cid, name, ctype, notnull, default, pk = col
+        if name == "role":
+            parts.append(
+                "role TEXT NOT NULL CHECK (role IN "
+                "('etudiant','professeur','assistant','universite','section',"
+                "'ministere','superadmin','developpeur','techmanager','auteur'))"
+            )
+            continue
+        col_def = f"{name} {ctype or 'TEXT'}"
+        if pk:
+            col_def += " PRIMARY KEY"
+        elif notnull:
+            col_def += " NOT NULL"
+        if default is not None:
+            col_def += f" DEFAULT {default}"
+        parts.append(col_def)
+
+    col_names = ", ".join(c[1] for c in cols)
+    conn.execute(f"CREATE TABLE users_new ({', '.join(parts)})")
+    conn.execute(f"INSERT INTO users_new ({col_names}) SELECT {col_names} FROM users")
+    conn.execute("DROP TABLE users")
+    conn.execute("ALTER TABLE users_new RENAME TO users")
+
+
 def _migrate_diplomas_table(conn, backend: str) -> None:
     if backend == "mysql":
         cur = conn.cursor()
@@ -1795,9 +1973,9 @@ def _migrate_users_roles_mysql(conn) -> None:
     """Étend le CHECK role MySQL (developpeur, techmanager, admin…)."""
     roles_sql = (
         "'etudiant','professeur','assistant','universite','section',"
-        "'ministere','superadmin','developpeur','techmanager'"
+        "'ministere','superadmin','developpeur','techmanager','auteur'"
     )
-    required = ("developpeur", "techmanager")
+    required = ("developpeur", "techmanager", "auteur")
     cur = conn.cursor()
 
     def role_checks_ok() -> bool:
@@ -2171,6 +2349,8 @@ def _connect_mysql() -> SACDatabase:
     _migrate_campus_academic_fees_columns(conn, "mysql")
     _migrate_academic_payments_table(conn, "mysql")
     _migrate_digital_library_table(conn, "mysql")
+    _migrate_digital_library_edb_columns(conn, "mysql")
+    _migrate_edb_tables(conn, "mysql")
     _migrate_diplomas_table(conn, "mysql")
     _migrate_platform_courses_table(conn, "mysql")
     _migrate_career_offers_table(conn, "mysql")
@@ -2345,6 +2525,8 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_campus_academic_fees_columns(conn, "sqlite")
     _migrate_academic_payments_table(conn, "sqlite")
     _migrate_digital_library_table(conn, "sqlite")
+    _migrate_digital_library_edb_columns(conn, "sqlite")
+    _migrate_edb_tables(conn, "sqlite")
     _migrate_diplomas_table(conn, "sqlite")
     _migrate_platform_courses_table(conn, "sqlite")
     _migrate_career_offers_table(conn, "sqlite")
@@ -2361,6 +2543,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_reset_code_column(conn, "sqlite")
     _migrate_users_developpeur_role_sqlite(conn)
     _migrate_users_techmanager_role_sqlite(conn)
+    _migrate_users_auteur_role_sqlite(conn)
     _migrate_attack_shield_tables(conn, "sqlite")
     _migrate_staff_mfa_challenges(conn, "sqlite")
     conn.commit()

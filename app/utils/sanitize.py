@@ -41,6 +41,7 @@ def clean_role(role: str | None) -> str | None:
         "superadmin",
         "developpeur",
         "techmanager",
+        "auteur",
     }
     return role if role in allowed else None
 
