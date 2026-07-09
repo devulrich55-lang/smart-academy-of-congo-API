@@ -389,6 +389,38 @@ def assert_completed_for_use(tx_id: str, expected_purpose: str, actor: dict | No
     return tx
 
 
+def list_for_campus(universite: str, limit: int = 500) -> list[dict]:
+    from app.utils.campus_catalog import resolve_campus_id, same_campus
+
+    campus = resolve_campus_id(universite) or str(universite or "").strip().lower()
+    if not campus:
+        return []
+    rows = get_db().execute(
+        """SELECT * FROM mobile_money_transactions
+           ORDER BY created_at DESC LIMIT ?""",
+        (max(1, min(int(limit or 500), 2000)),),
+    ).fetchall()
+    out = []
+    for row in rows:
+        tx = _row_to_tx(row)
+        uni = tx.get("universite") or ""
+        if uni and not same_campus(campus, uni):
+            continue
+        if not uni and tx.get("userEmail"):
+            continue
+        out.append(tx)
+    return out
+
+
+def list_all(limit: int = 2000) -> list[dict]:
+    rows = get_db().execute(
+        """SELECT * FROM mobile_money_transactions
+           ORDER BY created_at DESC LIMIT ?""",
+        (max(1, min(int(limit or 2000), 5000)),),
+    ).fetchall()
+    return [_row_to_tx(r) for r in rows]
+
+
 def expire_stale_transactions() -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     cur = get_db().execute(

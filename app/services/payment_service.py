@@ -452,3 +452,158 @@ def update_payment_status(actor: dict, payment_id: str, body: dict) -> dict:
             f"{settings.frontend_url}/dashboard-etudiant.html#frais",
         )
     return payment
+
+
+PLATFORM_AGGREGATOR_ROLES = frozenset({"superadmin", "techmanager", "developpeur"})
+
+
+def _mobile_to_aggregator_tx(tx: dict) -> dict:
+    purpose = tx.get("purpose") or "mobile"
+    category = (
+        "Inscription plateforme"
+        if purpose == "inscription"
+        else "Frais académique (Mobile Money)"
+    )
+    status = tx.get("status") or ""
+    if status == "completed":
+        norm_status = "confirmed"
+    elif status in ("failed", "expired"):
+        norm_status = "rejected"
+    else:
+        norm_status = "pending"
+    amount_usd = float(tx.get("amountUsd") or 0)
+    amount_cdf = int(tx.get("amountCdf") or 0)
+    currency = "USD" if amount_usd > 0 else (tx.get("currency") or "CDF")
+    amount = amount_usd if amount_usd > 0 else amount_cdf
+    return {
+        "id": tx.get("id"),
+        "kind": "mobile",
+        "universite": tx.get("universite") or "",
+        "studentEmail": tx.get("userEmail") or "",
+        "studentNom": "",
+        "matricule": "—",
+        "amount": amount,
+        "currency": currency,
+        "method": tx.get("provider") or "mobile",
+        "status": norm_status,
+        "rawStatus": status,
+        "category": category,
+        "feeKey": purpose,
+        "feeLabel": category,
+        "reference": tx.get("referenceExternal") or tx.get("id") or "",
+        "createdAt": tx.get("createdAt") or "",
+        "confirmedAt": tx.get("completedAt") or "",
+        "confirmedBy": "",
+    }
+
+
+def _academic_to_aggregator_tx(payment: dict) -> dict:
+    return {
+        **payment,
+        "kind": "academic",
+        "category": payment.get("feeLabel") or payment.get("feeKey") or "Frais académiques",
+        "rawStatus": payment.get("status") or "",
+    }
+
+
+def _summarize_transactions(transactions: list[dict]) -> dict:
+    summary = {
+        "totalCount": len(transactions),
+        "confirmedCount": 0,
+        "pendingCount": 0,
+        "rejectedCount": 0,
+        "totalAmountUsd": 0.0,
+        "totalAmountCdf": 0,
+        "byMethod": {},
+        "byCategory": {},
+        "byStatus": {},
+    }
+    for tx in transactions:
+        status = tx.get("status") or "pending"
+        summary["byStatus"][status] = summary["byStatus"].get(status, 0) + 1
+        if status == "confirmed":
+            summary["confirmedCount"] += 1
+        elif status == "rejected":
+            summary["rejectedCount"] += 1
+        else:
+            summary["pendingCount"] += 1
+        method = tx.get("method") or "—"
+        summary["byMethod"][method] = summary["byMethod"].get(method, 0) + 1
+        category = tx.get("category") or "—"
+        summary["byCategory"][category] = summary["byCategory"].get(category, 0) + 1
+        currency = str(tx.get("currency") or "USD").upper()
+        amount = float(tx.get("amount") or 0)
+        if currency == "CDF":
+            summary["totalAmountCdf"] += int(amount)
+        else:
+            summary["totalAmountUsd"] += amount
+    summary["totalAmountUsd"] = round(summary["totalAmountUsd"], 2)
+    return summary
+
+
+def _group_by_university(transactions: list[dict]) -> list[dict]:
+    groups: dict[str, dict] = {}
+    for tx in transactions:
+        uni = str(tx.get("universite") or "").strip().lower() or "__platform__"
+        if uni not in groups:
+            groups[uni] = {
+                "universite": uni if uni != "__platform__" else "",
+                "label": uni if uni != "__platform__" else "Plateforme (inscription)",
+                "transactions": [],
+            }
+        groups[uni]["transactions"].append(tx)
+    out = []
+    for group in groups.values():
+        group["summary"] = _summarize_transactions(group["transactions"])
+        group["transactionCount"] = len(group["transactions"])
+        out.append(group)
+    out.sort(key=lambda g: (-g["transactionCount"], g.get("label") or ""))
+    return out
+
+
+def campus_aggregator(actor: dict) -> dict:
+    if actor.get("role") != "universite":
+        raise ValueError("FORBIDDEN")
+    from app.services import mobile_money_service
+
+    campus = resolve_campus_id(
+        actor.get("universite") or actor.get("sigle") or actor.get("codeUni")
+    ) or ""
+    academic = [_academic_to_aggregator_tx(p) for p in list_payments_for_campus(actor)]
+    mobile = [
+        _mobile_to_aggregator_tx(tx)
+        for tx in mobile_money_service.list_for_campus(campus)
+    ]
+    transactions = sorted(
+        academic + mobile,
+        key=lambda t: t.get("createdAt") or "",
+        reverse=True,
+    )
+    return {
+        "universite": campus,
+        "summary": _summarize_transactions(transactions),
+        "transactions": transactions,
+    }
+
+
+def platform_aggregator(actor: dict) -> dict:
+    if actor.get("role") not in PLATFORM_AGGREGATOR_ROLES:
+        raise ValueError("FORBIDDEN")
+    from app.services import mobile_money_service
+
+    rows = get_db().execute(
+        "SELECT * FROM academic_payments ORDER BY created_at DESC LIMIT 3000"
+    ).fetchall()
+    academic = [_academic_to_aggregator_tx(_row_to_payment(r)) for r in rows]
+    mobile = [_mobile_to_aggregator_tx(tx) for tx in mobile_money_service.list_all(3000)]
+    transactions = sorted(
+        academic + mobile,
+        key=lambda t: t.get("createdAt") or "",
+        reverse=True,
+    )
+    by_university = _group_by_university(transactions)
+    return {
+        "summary": _summarize_transactions(transactions),
+        "byUniversity": by_university,
+        "transactions": transactions,
+    }

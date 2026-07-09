@@ -114,6 +114,24 @@ def campus_payments_route(user: dict = Depends(require_roles("universite"))):
         _map_error(e)
 
 
+@router.get("/campus/aggregator")
+def campus_aggregator_route(user: dict = Depends(require_roles("universite"))):
+    try:
+        return {"ok": True, **payment_service.campus_aggregator(user)}
+    except ValueError as e:
+        _map_error(e)
+
+
+@router.get("/platform/aggregator")
+def platform_aggregator_route(
+    user: dict = Depends(require_roles("superadmin", "techmanager", "developpeur")),
+):
+    try:
+        return {"ok": True, **payment_service.platform_aggregator(user)}
+    except ValueError as e:
+        _map_error(e)
+
+
 @router.patch("/{payment_id}")
 def update_payment_route(
     payment_id: str, body: dict, user: dict = Depends(require_roles("universite"))
