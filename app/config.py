@@ -172,10 +172,10 @@ class Settings:
     attack_shield_alert_whatsapp_phone: str = os.getenv(
         "ATTACK_SHIELD_ALERT_WHATSAPP", "+243851848859"
     ).strip()
-    staff_mfa_enabled: bool = os.getenv(
-        "STAFF_MFA_ENABLED",
-        "true" if os.getenv("NODE_ENV") == "production" else "false",
-    ).lower() == "true"
+    # Désactivé par défaut : pas de code e-mail à chaque connexion staff.
+    # Réinitialisation mot de passe uniquement via « Mot de passe oublié ».
+    # Pour réactiver : STAFF_MFA_ENABLED=true sur l'API Render.
+    staff_mfa_enabled: bool = os.getenv("STAFF_MFA_ENABLED", "false").lower() == "true"
 
     @property
     def use_mysql(self) -> bool:

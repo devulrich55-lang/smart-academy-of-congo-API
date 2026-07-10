@@ -422,6 +422,10 @@ def create_user(profile: dict) -> dict:
             get_db().commit()
             created = find_user_by_id(user_id) or created
         _notify_section_pending_inscription(created)
+    if created and created.get("role") in ("etudiant", "professeur", "assistant"):
+        from app.services import enrollment_renewal_service
+
+        enrollment_renewal_service.seed_initial_enrollment(created)
     return created
 
 
@@ -546,7 +550,9 @@ def user_to_session(user: dict | None) -> dict | None:
             session["authorStatus"] = author.get("status")
             session["mobileMoney"] = author.get("mobileMoney")
             session["penName"] = author.get("penName")
-    return session
+    from app.services import enrollment_renewal_service
+
+    return enrollment_renewal_service.enrich_session(session, user)
 
 
 def _is_rector_actor(actor: dict) -> bool:

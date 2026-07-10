@@ -2367,6 +2367,7 @@ def _connect_mysql() -> SACDatabase:
     _migrate_users_roles_mysql(conn)
     _migrate_attack_shield_tables(conn, "mysql")
     _migrate_staff_mfa_challenges(conn, "mysql")
+    _migrate_annual_enrollments_table(conn, "mysql")
     return SACDatabase(conn, "mysql")
 
 
@@ -2474,6 +2475,48 @@ def _migrate_staff_mfa_challenges(conn, backend: str) -> None:
         pass
 
 
+def _migrate_annual_enrollments_table(conn, backend: str) -> None:
+    sql = """
+    CREATE TABLE IF NOT EXISTS annual_enrollments (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      academic_year TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending_payment',
+      payment_json TEXT,
+      renewed_at TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, academic_year)
+    )
+    """
+    idx = (
+        "CREATE INDEX IF NOT EXISTS idx_annual_enroll_user "
+        "ON annual_enrollments(user_id, academic_year)"
+    )
+    idx_status = (
+        "CREATE INDEX IF NOT EXISTS idx_annual_enroll_status "
+        "ON annual_enrollments(status, created_at DESC)"
+    )
+    if backend == "mysql":
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            cur.execute(idx)
+            cur.execute(idx_status)
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            cur.close()
+        return
+    try:
+        conn.execute(sql)
+        conn.execute(idx)
+        conn.execute(idx_status)
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _connect_sqlite() -> SACDatabase:
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(settings.db_path), check_same_thread=False)
@@ -2546,6 +2589,7 @@ def _connect_sqlite() -> SACDatabase:
     _migrate_users_auteur_role_sqlite(conn)
     _migrate_attack_shield_tables(conn, "sqlite")
     _migrate_staff_mfa_challenges(conn, "sqlite")
+    _migrate_annual_enrollments_table(conn, "sqlite")
     conn.commit()
     return SACDatabase(conn, "sqlite")
 

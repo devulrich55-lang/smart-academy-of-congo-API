@@ -37,7 +37,7 @@ from app.middleware.security import (
 
 from app.rate_limit import limiter
 
-from app.routes import admin, auth, backup, dev_center, documents, edb, monitor, nominations, payments, platform, reclamations, sections, tariffs, tech_manager, webrtc
+from app.routes import admin, auth, backup, dev_center, documents, edb, enrollments, monitor, nominations, payments, platform, reclamations, sections, tariffs, tech_manager, webrtc
 
 from app.seed import (
     seed_demo_sections_if_missing,
@@ -270,6 +270,8 @@ def health(request: Request):
 
 
 app.include_router(auth.router, prefix="/api")
+
+app.include_router(enrollments.router, prefix="/api")
 
 app.include_router(documents.router, prefix="/api")
 
