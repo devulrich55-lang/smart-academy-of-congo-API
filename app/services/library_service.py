@@ -108,9 +108,18 @@ def _assert_ministry(actor: dict) -> None:
 def _assert_author(actor: dict) -> None:
     if actor.get("role") != AUTHOR_ROLE:
         raise ValueError("FORBIDDEN")
-    status = edb_service.get_author_status(actor.get("email") or "")
-    if status != "approved":
+    email = (actor.get("email") or "").lower()
+    status = edb_service.get_author_status(email)
+    if status == "approved":
+        return
+    if status in ("pending", "rejected"):
         raise ValueError("FORBIDDEN")
+    from app.services.user_service import find_user_by_email
+
+    user = find_user_by_email(email)
+    if user and user.get("role") == AUTHOR_ROLE:
+        return
+    raise ValueError("FORBIDDEN")
 
 
 def _can_manage_row(actor: dict, row) -> None:
@@ -174,7 +183,7 @@ def create_book(actor: dict, data: dict) -> dict:
 
     title = clean_text(data.get("title"), 200)
     category = clean_text(data.get("category"), 40)
-    if not title or len(title) < 3:
+    if not title or len(title) < 2:
         raise ValueError("INVALID_INPUT")
     if category not in CATEGORIES:
         category = "autre"
@@ -226,35 +235,41 @@ def create_book(actor: dict, data: dict) -> dict:
         "updated_at": now,
     }
     db = get_db()
-    db.execute(
-        """INSERT INTO digital_library
-           (id, title, author, category, description, language, file_url, cover_url,
-            published, author_id, author_role, source, is_free, price, currency,
-            author_email, author_mobile_money, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            row["id"],
-            row["title"],
-            row["author"],
-            row["category"],
-            row["description"],
-            row["language"],
-            row["file_url"],
-            row["cover_url"],
-            row["published"],
-            row["author_id"],
-            row["author_role"],
-            row["source"],
-            row["is_free"],
-            row["price"],
-            row["currency"],
-            row["author_email"],
-            row["author_mobile_money"],
-            row["created_at"],
-            row["updated_at"],
-        ),
-    )
-    db.commit()
+    try:
+        db.execute(
+            """INSERT INTO digital_library
+               (id, title, author, category, description, language, file_url, cover_url,
+                published, author_id, author_role, source, is_free, price, currency,
+                author_email, author_mobile_money, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                row["id"],
+                row["title"],
+                row["author"],
+                row["category"],
+                row["description"],
+                row["language"],
+                row["file_url"],
+                row["cover_url"],
+                row["published"],
+                row["author_id"],
+                row["author_role"],
+                row["source"],
+                row["is_free"],
+                row["price"],
+                row["currency"],
+                row["author_email"],
+                row["author_mobile_money"],
+                row["created_at"],
+                row["updated_at"],
+            ),
+        )
+        db.commit()
+    except Exception as exc:
+        msg = str(exc).upper()
+        if "NO SUCH COLUMN" in msg or "UNKNOWN COLUMN" in msg:
+            raise ValueError("LIBRARY_SCHEMA") from exc
+        raise ValueError("CREATE_FAILED") from exc
     return _row_to_item(row, actor.get("email"))
 
 

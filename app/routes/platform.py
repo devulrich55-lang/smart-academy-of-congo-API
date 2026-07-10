@@ -30,6 +30,50 @@ HOME_NEWS_ALLOWED_EXT = {
     ".doc",
     ".docx",
 }
+LIBRARY_MAX_SIZE = 50 * 1024 * 1024
+LIBRARY_ALLOWED_EXT = {
+    ".pdf",
+    ".epub",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+}
+
+
+async def _save_library_uploads(files: list[UploadFile]) -> list[dict]:
+    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    attachments = []
+    for f in files[:2]:
+        ext = Path(f.filename or "").suffix.lower()
+        if ext in HOME_NEWS_BLOCKED_EXT:
+            raise HTTPException(status_code=400, detail={"error": "INVALID_FILE"})
+        if ext and ext not in LIBRARY_ALLOWED_EXT:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "INVALID_FILE", "message": "Format non autorisé (PDF, EPUB, images)."},
+            )
+        safe_ext = ext.lstrip(".") if ext in LIBRARY_ALLOWED_EXT else "pdf"
+        name = f"{uuid.uuid4()}.{safe_ext}"
+        dest = settings.upload_dir / name
+        content = await f.read()
+        if len(content) > LIBRARY_MAX_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail={"error": "FILE_TOO_LARGE", "message": "Fichier max 50 Mo"},
+            )
+        dest.write_bytes(content)
+        attachments.append(
+            {
+                "name": f.filename or name,
+                "mediaPath": name,
+                "mediaUrl": f"/uploads/{name}",
+                "size": f"{len(content) // 1024} Ko",
+            }
+        )
+    return attachments
+
+
 HOME_NEWS_BLOCKED_EXT = {
     ".exe",
     ".bat",
@@ -887,7 +931,7 @@ async def upload_library_file_route(
     user: dict = Depends(require_roles("ministere", "superadmin", "auteur")),
 ):
     del user
-    saved = await _save_home_news_uploads(files)
+    saved = await _save_library_uploads(files)
     if not saved:
         raise HTTPException(status_code=400, detail={"error": "INVALID_INPUT"})
     primary = saved[0]
@@ -1507,6 +1551,19 @@ def _handle_platform_error(exc: ValueError) -> None:
         raise HTTPException(
             status_code=413,
             detail={"error": code, "message": "Fichier trop volumineux."},
+        )
+    if code == "LIBRARY_SCHEMA":
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": code,
+                "message": "Base bibliothèque à mettre à jour — redéployez l'API Render.",
+            },
+        )
+    if code == "CREATE_FAILED":
+        raise HTTPException(
+            status_code=500,
+            detail={"error": code, "message": "Publication impossible — vérifiez les fichiers et réessayez."},
         )
     if code == "INVALID_LANG":
         raise HTTPException(
