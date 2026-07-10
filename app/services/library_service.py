@@ -69,8 +69,12 @@ def _row_to_item(row, viewer_email: str | None = None) -> dict:
         row["author_mobile_money"] if "author_mobile_money" in row.keys() else ""
     )
     file_url = row["file_url"] or ""
+    author_id = (row["author_id"] or "").lower() if "author_id" in row.keys() else ""
+    viewer = (viewer_email or "").strip().lower()
     if source == EDB_SOURCE and not is_free:
-        if not viewer_email or not edb_service.buyer_owns_book(viewer_email, row["id"]):
+        is_author = bool(viewer and author_id and viewer == author_id)
+        is_buyer = bool(viewer and edb_service.buyer_owns_book(viewer, row["id"]))
+        if not is_author and not is_buyer:
             file_url = ""
 
     item = {

@@ -41,6 +41,14 @@ LIBRARY_ALLOWED_EXT = {
 }
 
 
+def _library_media_kind(ext: str) -> str:
+    if ext in {".jpg", ".jpeg", ".png", ".webp"}:
+        return "image"
+    if ext == ".epub":
+        return "epub"
+    return "document"
+
+
 async def _save_library_uploads(files: list[UploadFile]) -> list[dict]:
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     attachments = []
@@ -69,6 +77,7 @@ async def _save_library_uploads(files: list[UploadFile]) -> list[dict]:
                 "mediaPath": name,
                 "mediaUrl": f"/uploads/{name}",
                 "size": f"{len(content) // 1024} Ko",
+                "mediaType": _library_media_kind(ext),
             }
         )
     return attachments
@@ -899,6 +908,14 @@ def create_library_route(
         return {"ok": True, "item": item}
     except ValueError as e:
         _handle_platform_error(e)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "CREATE_FAILED",
+                "message": "Publication impossible — vérifiez les fichiers et réessayez.",
+            },
+        ) from exc
 
 
 @router.patch("/library/{item_id}")
@@ -938,8 +955,9 @@ async def upload_library_file_route(
     return {
         "ok": True,
         "fileUrl": primary["mediaUrl"],
+        "url": primary["mediaUrl"],
         "fileName": primary["name"],
-        "mediaType": primary["mediaType"],
+        "mediaType": primary.get("mediaType") or "document",
     }
 
 

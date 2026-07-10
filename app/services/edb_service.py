@@ -402,13 +402,16 @@ def buyer_owns_book(buyer_email: str, book_id: str) -> bool:
     book_id = clean_text(book_id, 80)
     if not buyer_email or not book_id:
         return False
-    row = get_db().execute(
-        """SELECT 1 FROM edb_purchases
-           WHERE buyer_email = ? COLLATE NOCASE AND book_id = ?
-           LIMIT 1""",
-        (buyer_email, book_id),
-    ).fetchone()
-    return row is not None
+    try:
+        row = get_db().execute(
+            """SELECT 1 FROM edb_purchases
+               WHERE buyer_email = ? COLLATE NOCASE AND book_id = ?
+               LIMIT 1""",
+            (buyer_email, book_id),
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
 
 
 def list_purchased_book_ids(buyer_email: str) -> list[str]:
