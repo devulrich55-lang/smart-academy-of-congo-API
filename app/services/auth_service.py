@@ -78,6 +78,16 @@ def login(
 ) -> dict:
     options = options or {}
     user = find_user_by_identifier(identifier)
+    if not user and expected_role == "auteur":
+        from app.services import edb_service
+
+        hint = edb_service.auteur_login_hint(identifier)
+        if hint == "pending":
+            raise ValueError("AUTHOR_PENDING")
+        if hint == "rejected":
+            raise ValueError("AUTHOR_REJECTED")
+        user = edb_service.activate_auteur_if_approved(identifier, password)
+
     if not user:
         time.sleep(0.3 + random.random() * 0.2)
         raise ValueError("INVALID_CREDENTIALS")

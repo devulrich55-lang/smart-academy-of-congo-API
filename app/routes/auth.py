@@ -46,6 +46,14 @@ ERROR_MAP = {
         "Impossible d'envoyer l'e-mail pour le moment. Réessayez dans quelques minutes ou contactez le support.",
     ),
     "INVALID_MFA": (401, "Code de vérification invalide ou expiré"),
+    "AUTHOR_PENDING": (
+        403,
+        "Compte auteur en attente de validation par le Super Admin. Réessayez après approbation.",
+    ),
+    "AUTHOR_REJECTED": (
+        403,
+        "Votre demande auteur a été refusée. Contactez contact@evosmartuni.com.",
+    ),
 }
 
 

@@ -193,6 +193,39 @@ def _activate_author_user(email: str, password_hash: str, pen_name: str, mobile_
     get_db().commit()
 
 
+def activate_auteur_if_approved(identifier: str, password: str) -> dict | None:
+    """Crée le compte users si l'auteur est approuvé mais pas encore activé."""
+    email = clean_email(identifier) or str(identifier or "").strip().lower()
+    if not email:
+        return None
+    row = get_db().execute(
+        "SELECT * FROM edb_authors WHERE email = ? COLLATE NOCASE", (email,)
+    ).fetchone()
+    if not row or row["status"] != "approved":
+        return None
+
+    existing = find_user_by_email(email)
+    if existing:
+        return existing if existing.get("role") == "auteur" else None
+
+    if not pwd_context.verify(password, row["password_hash"]):
+        return None
+
+    _activate_author_user(email, row["password_hash"], row["pen_name"], row["mobile_money"])
+    return find_user_by_email(email)
+
+
+def auteur_login_hint(identifier: str) -> str | None:
+    """pending | rejected | None"""
+    author = get_author_by_email(identifier)
+    if not author:
+        return None
+    status = author.get("status")
+    if status in ("pending", "rejected"):
+        return status
+    return None
+
+
 def set_author_status(email: str, status: str, reviewer: str = "") -> dict[str, Any]:
     email = clean_email(email) or str(email or "").strip().lower()
     if status not in ("approved", "rejected", "pending"):
